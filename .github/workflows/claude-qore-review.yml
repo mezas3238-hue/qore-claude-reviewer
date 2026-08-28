@@ -35,7 +35,7 @@ jobs:
   review:
     name: Claude read-only review
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     steps:
       - name: Checkout Claude reviewer infrastructure
@@ -87,6 +87,11 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Set up exact CPython gate version
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12.14'
+
       - name: Verify exact git binding and synthetic parents
         working-directory: workspace/qore-core
         env:
@@ -107,33 +112,283 @@ jobs:
           SYNTHETIC_TREE="$(git show -s --format=%T "$EXPECTED_SYNTHETIC")"
           test "$HEAD_TREE" = "$SYNTHETIC_TREE"
           echo "Frozen Claude binding verified."
+          echo "HEAD tree: ${HEAD_TREE}"
           git diff --stat "$EXPECTED_BASE" "$EXPECTED_HEAD"
 
-      - name: Run independent Claude reviewer
+      - name: Build deterministic mandatory review evidence
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           QORE_ROOT: ${{ github.workspace }}/workspace/qore-core
-          PR_NUMBER: ${{ inputs.pr_number }}
-          PACKAGE_ID: ${{ inputs.package_id }}
           EXPECTED_BASE: ${{ inputs.expected_base }}
           EXPECTED_HEAD: ${{ inputs.expected_head }}
-          EXPECTED_SYNTHETIC: ${{ inputs.expected_synthetic }}
-          PROMPT_PATH: ${{ github.workspace }}/${{ inputs.prompt_path }}
-          REVIEW_OUTPUT: ${{ github.workspace }}/claude-review.md
-          CLAUDE_MODEL: claude-opus-5
-          CLAUDE_MAX_TOKENS: "32000"
-          CLAUDE_MAX_ROUNDS: "8"
+          EVIDENCE_OUTPUT: ${{ runner.temp }}/qore-claude-mandatory-evidence.md
         run: |
           set -euo pipefail
-          python3 scripts/claude_reviewer.py
+          python3 - <<'PY'
+          from __future__ import annotations
 
-      - name: Verify frozen HEAD again after review
+          import importlib
+          import os
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          root = Path(os.environ["QORE_ROOT"]).resolve()
+          base = os.environ["EXPECTED_BASE"]
+          head = os.environ["EXPECTED_HEAD"]
+          output = Path(os.environ["EVIDENCE_OUTPUT"])
+          infra = root / "tests" / "infrastructure"
+          sys.path.insert(0, str(infra))
+
+          scanners = {
+              "r62f": (
+                  "test_universal_cross_asset_conformance_final_owner_r62f_guards",
+                  "_r62f_dynamic_execution_markers_from_source",
+              ),
+              "r62g": (
+                  "test_universal_cross_asset_conformance_final_owner_r62g_guards",
+                  "_r62g_dynamic_execution_markers_from_source",
+              ),
+              "r62j": (
+                  "test_universal_cross_asset_conformance_final_owner_r62j_guards",
+                  "_r62j_dynamic_execution_markers_from_source",
+              ),
+              "r62k": (
+                  "test_universal_cross_asset_conformance_final_owner_r62k_guards",
+                  "_r62k_dynamic_execution_markers_from_source",
+              ),
+          }
+
+          loaded: dict[str, object] = {}
+          for name, (module_name, symbol) in scanners.items():
+              loaded[name] = getattr(importlib.import_module(module_name), symbol)
+
+          def scan(name: str, source: str) -> tuple[str, ...]:
+              fn = loaded[name]
+              return fn(source)  # type: ignore[operator]
+
+          def runtime(source: str) -> str:
+              namespace: dict[str, object] = {}
+              try:
+                  code = compile(source, "<qore-claude-probe>", "exec", dont_inherit=True)
+                  exec(code, namespace)
+              except Exception as exc:
+                  return f"EXCEPTION {type(exc).__name__} args={exc.args!r}"
+              return repr(namespace.get("result"))
+
+          namedexpr = """\
+          import builtins
+          def run():
+              return globals()["b"].eval("1+1")
+          result = ((b := builtins), run())[1]
+          """
+          transient = """\
+          def run():
+              return globals()["b"].eval("1+1")
+          import builtins as b
+          b = len
+          try:
+              result = run()
+          except AttributeError:
+              result = 3
+          """
+          dangerous = """\
+          def run():
+              return globals()["b"].eval("1+1")
+          import builtins as b
+          result = run()
+          b = len
+          """
+          nested_vars = """\
+          def run():
+              return vars()["__builtins__"].eval("1+1")
+          result = run()
+          """
+          retained_default = """\
+          def outer():
+              import builtins
+              def hold(namespace=vars()):
+                  return None
+              return hold
+          hold = outer()
+          result = hold.__defaults__[0]["builtins"].eval("1+1")
+          """
+          module_vars = 'import builtins\nresult = vars()["builtins"].eval("1+1")\n'
+
+          matrix = {
+              "namedexpr_same_statement": {
+                  "runtime": runtime(namedexpr),
+                  "r62k": scan("r62k", namedexpr),
+              },
+              "transient_rebound_before_call": {
+                  "runtime": runtime(transient),
+                  "r62j": scan("r62j", transient),
+                  "r62k": scan("r62k", transient),
+              },
+              "dangerous_call_before_rebound": {
+                  "runtime": runtime(dangerous),
+                  "r62k": scan("r62k", dangerous),
+              },
+              "nested_vars_no_module_slot": {
+                  "runtime": runtime(nested_vars),
+                  "r62f": scan("r62f", nested_vars),
+                  "r62g": scan("r62g", nested_vars),
+                  "r62k": scan("r62k", nested_vars),
+              },
+              "nested_retained_default": {
+                  "runtime": runtime(retained_default),
+                  "r62g": scan("r62g", retained_default),
+                  "r62k": scan("r62k", retained_default),
+              },
+              "module_vars_dangerous": {
+                  "runtime": runtime(module_vars),
+                  "r62g": scan("r62g", module_vars),
+                  "r62k": scan("r62k", module_vars),
+              },
+          }
+
+          assert matrix["namedexpr_same_statement"]["runtime"] == "2"
+          assert matrix["namedexpr_same_statement"]["r62k"]
+          assert matrix["transient_rebound_before_call"]["runtime"] == "3"
+          assert matrix["transient_rebound_before_call"]["r62j"]
+          assert matrix["transient_rebound_before_call"]["r62k"] == ()
+          assert matrix["dangerous_call_before_rebound"]["runtime"] == "2"
+          assert matrix["dangerous_call_before_rebound"]["r62k"]
+          assert matrix["nested_vars_no_module_slot"]["runtime"].startswith("EXCEPTION KeyError")
+          assert matrix["nested_vars_no_module_slot"]["r62f"]
+          assert matrix["nested_vars_no_module_slot"]["r62g"] == ()
+          assert matrix["nested_vars_no_module_slot"]["r62k"] == ()
+          assert matrix["nested_retained_default"]["runtime"] == "2"
+          assert matrix["nested_retained_default"]["r62g"]
+          assert matrix["nested_retained_default"]["r62k"]
+          assert matrix["module_vars_dangerous"]["runtime"] == "2"
+          assert matrix["module_vars_dangerous"]["r62k"]
+
+          def git(*args: str) -> str:
+              return subprocess.check_output(["git", *args], cwd=root, text=True).strip()
+
+          changed = git("diff", "--name-only", base, head).splitlines()
+          src_delta = [path for path in changed if path.startswith("src/qore/")]
+          oracle = root / "tests/infrastructure/test_universal_cross_asset_conformance_full_closure.py"
+          r62k_path = root / "tests/infrastructure/test_universal_cross_asset_conformance_final_owner_r62k_guards.py"
+
+          lines = [
+              "# MACHINE-VERIFIED FROZEN EVIDENCE",
+              "",
+              f"CPython: `{sys.version.split()[0]}`",
+              f"HEAD: `{git('rev-parse', 'HEAD')}`",
+              f"HEAD tree: `{git('show', '-s', '--format=%T', head)}`",
+              f"BASE..HEAD changed files: `{len(changed)}`",
+              f"src/qore changed files: `{len(src_delta)}`",
+              f"oracle blob: `{git('hash-object', str(oracle.relative_to(root)))}`",
+              f"R62K blob: `{git('hash-object', str(r62k_path.relative_to(root)))}`",
+              "",
+              "## Mandatory runtime/scanner matrix",
+              "",
+          ]
+          for label, evidence in matrix.items():
+              lines.append(f"### {label}")
+              for key, value in evidence.items():
+                  lines.append(f"- {key}: `{value!r}`")
+              lines.append("")
+
+          lines.extend([
+              "## Exact BASE..HEAD changed-file list",
+              "",
+              "```text",
+              *changed,
+              "```",
+              "",
+              "Quality Gate evidence bound by Integration Authority before this run:",
+              "QORE CI #1653; CPython 3.12.14; Ruff clean; Mypy 737 source files; 4806 passed; 6 pre-existing warnings; coverage 47568/6234 = 87%.",
+              "Treat this QG sentence as supplied evidence; use the checkout and mandatory probes to falsify semantic claims independently.",
+          ])
+          output.write_text("\n".join(lines) + "\n", encoding="utf-8")
+          print(f"Mandatory evidence written: {output}")
+          PY
+
+      - name: Install Claude Code
+        run: |
+          set -euo pipefail
+          curl -fsSL https://claude.ai/install.sh | bash -s -- 2.1.251
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Run independent Claude Code reviewer
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN_RAW: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          QORE_ROOT: ${{ github.workspace }}/workspace/qore-core
+          PROMPT_PATH: ${{ github.workspace }}/${{ inputs.prompt_path }}
+          EVIDENCE_PATH: ${{ runner.temp }}/qore-claude-mandatory-evidence.md
+          RAW_OUTPUT: ${{ github.workspace }}/claude-execution.json
+          REVIEW_OUTPUT: ${{ github.workspace }}/claude-review.md
+        run: |
+          set -euo pipefail
+          test -f "$PROMPT_PATH"
+          test -f "$EVIDENCE_PATH"
+          cat "$PROMPT_PATH" "$EVIDENCE_PATH" > "$RUNNER_TEMP/qore-claude-final-prompt.md"
+          CLEAN_TOKEN="$(printf '%s' "$CLAUDE_CODE_OAUTH_TOKEN_RAW" | tr -d '[:space:]')"
+          test -n "$CLEAN_TOKEN"
+          export CLAUDE_CODE_OAUTH_TOKEN="$CLEAN_TOKEN"
+          cd "$QORE_ROOT"
+          test -z "$(git status --porcelain)"
+          set +e
+          claude -p "$(cat "$RUNNER_TEMP/qore-claude-final-prompt.md")" \
+            --model claude-sonnet-5 \
+            --max-turns 80 \
+            --allowedTools Read \
+            --disallowedTools Bash Edit Write NotebookEdit WebFetch WebSearch Task \
+            --output-format json \
+            > "$RAW_OUTPUT" \
+            2> "$RUNNER_TEMP/claude-review.err"
+          STATUS=$?
+          set -e
+          if [ "$STATUS" -ne 0 ]; then
+            RAW_SECRET="$CLAUDE_CODE_OAUTH_TOKEN_RAW" CLEAN_SECRET="$CLEAN_TOKEN" \
+              python3 - "$RAW_OUTPUT" "$RUNNER_TEMP/claude-review.err" <<'PY'
+          import os
+          import pathlib
+          import sys
+
+          for path in sys.argv[1:]:
+              text = pathlib.Path(path).read_text(encoding="utf-8", errors="replace")
+              for secret in (os.environ.get("RAW_SECRET", ""), os.environ.get("CLEAN_SECRET", "")):
+                  if secret:
+                      text = text.replace(secret, "[REDACTED]")
+              if text.strip():
+                  print(text[:12000])
+          PY
+            exit "$STATUS"
+          fi
+          unset CLAUDE_CODE_OAUTH_TOKEN_RAW CLEAN_TOKEN CLAUDE_CODE_OAUTH_TOKEN
+          cd "$GITHUB_WORKSPACE"
+          python3 - "$RAW_OUTPUT" "$REVIEW_OUTPUT" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          payload = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+          if payload.get("is_error"):
+              raise SystemExit(f"Claude mechanical failure: {payload.get('result')}")
+          result = str(payload.get("result", "")).strip()
+          if not result:
+              raise SystemExit("Claude mechanical failure: empty final result")
+          clean = "HALLAZGOS: NINGUNO" in result and "VALIDACIÓN OK" in result
+          not_ok = "VALIDACIÓN NO OK" in result
+          if clean == not_ok:
+              raise SystemExit("Claude mechanical failure: ambiguous or missing final verdict contract")
+          pathlib.Path(sys.argv[2]).write_text(result + "\n", encoding="utf-8")
+          print("Claude final report extracted successfully.")
+          PY
+
+      - name: Verify reviewer remained read-only and frozen HEAD is unchanged
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           PR_NUMBER: ${{ inputs.pr_number }}
           EXPECTED_HEAD: ${{ inputs.expected_head }}
+          QORE_ROOT: ${{ github.workspace }}/workspace/qore-core
         run: |
           set -euo pipefail
+          test -z "$(git -C "$QORE_ROOT" status --porcelain)"
+          test "$(git -C "$QORE_ROOT" rev-parse HEAD)" = "$EXPECTED_HEAD"
           LIVE_HEAD="$(gh api "repos/mezas3238-hue/qore-core/pulls/${PR_NUMBER}" --jq '.head.sha')"
           echo "Post-review HEAD: ${LIVE_HEAD}"
           test "$LIVE_HEAD" = "$EXPECTED_HEAD"
@@ -160,7 +415,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: claude-${{ inputs.package_id }}
-          path: claude-review.md
+          path: |
+            claude-review.md
+            claude-execution.json
+            ${{ runner.temp }}/qore-claude-mandatory-evidence.md
           if-no-files-found: warn
           retention-days: 30
 
