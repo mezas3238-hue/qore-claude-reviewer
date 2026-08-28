@@ -20,7 +20,7 @@ jobs:
         id: app-token
         uses: actions/create-github-app-token@v3
         with:
-          client-id: ${{ vars.QORE_CLAUDE_APP_CLIENT_ID }}
+          app-id: 4749196
           private-key: ${{ secrets.QORE_CLAUDE_APP_PRIVATE_KEY }}
           owner: mezas3238-hue
           repositories: qore-core
