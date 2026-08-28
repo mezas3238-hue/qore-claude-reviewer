@@ -1,4 +1,4 @@
-name: Adjudicate R62M adjacent flow
+name: Adjudicate R62N edge precision
 
 on:
   push:
@@ -14,72 +14,93 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: mezas3238-hue/qore-core
-          ref: 4379261608aea1baff52dffab281d840b6b845c4
+          ref: 72bc45153fd8b15834f2d50951b473ae93f30824
           fetch-depth: 1
           persist-credentials: false
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12.14'
-      - name: Execute R62M adjacent witnesses
+      - name: Execute R62N edge witnesses
         run: |
           set -euo pipefail
           python3 - <<'PY'
           import importlib, sys
           from pathlib import Path
           sys.path.insert(0, str(Path('tests/infrastructure').resolve()))
-          r62m = getattr(importlib.import_module('test_universal_cross_asset_conformance_final_owner_r62m_guards'), '_r62m_dynamic_execution_markers_from_source')
+          r62n = getattr(importlib.import_module('test_universal_cross_asset_conformance_final_owner_r62n_guards'), '_r62n_dynamic_execution_markers_from_source')
           cases = {
-            'implicit_exception_after_import': '''def run():
-              return getattr(globals()["b"], "eval", lambda _: 3)("1+1")
-          try:
-              import builtins as b
-              1 / 0
-          except ZeroDivisionError:
-              result = run()
-          b = len
-          ''',
-            'safe_rebind_before_explicit_raise': '''import builtins as b
+            'handler_type_mismatch': '''import builtins as b
           def run():
               return getattr(globals()["b"], "eval", lambda _: 3)("1+1")
           try:
+              try:
+                  raise ValueError
+              except KeyError:
+                  result = run()
+          except ValueError:
               b = len
-              raise RuntimeError
-          except RuntimeError:
               result = run()
           ''',
-            'safe_rebind_before_implicit_raise': '''import builtins as b
+            'namedexpr_safe_before_raise': '''import builtins as b
           def run():
               return getattr(globals()["b"], "eval", lambda _: 3)("1+1")
           try:
-              b = len
-              1 / 0
+              ((b := len), 1 / 0)
           except ZeroDivisionError:
               result = run()
           ''',
-            'second_iteration_observation': '''def run():
+            'namedexpr_danger_before_raise': '''import builtins
+          def run():
               return getattr(globals()["b"], "eval", lambda _: 3)("1+1")
           b = len
-          for _ in (0, 1):
+          try:
+              ((b := builtins), 1 / 0)
+          except ZeroDivisionError:
               result = run()
-              import builtins as b
-          b = len
           ''',
-            'while_second_iteration_observation': '''def run():
+            'for_break_skips_else': '''import builtins as b
+          def run():
               return getattr(globals()["b"], "eval", lambda _: 3)("1+1")
-          b = len
-          i = 0
-          while i < 2:
-              result = run()
+          for _ in (0,):
+              b = len
+              break
+          else:
               import builtins as b
-              i += 1
-          b = len
+              result = run()
+          result = run()
           ''',
-            'safe_single_iteration': '''def run():
+            'for_continue_runs_else_safe': '''def run():
               return getattr(globals()["b"], "eval", lambda _: 3)("1+1")
           b = len
           for _ in (0,):
-              result = run()
+              import builtins as b
+              continue
+          else:
               b = len
+              result = run()
+          ''',
+            'try_else_raise_not_caught': '''import builtins as b
+          def run():
+              return getattr(globals()["b"], "eval", lambda _: 3)("1+1")
+          try:
+              b = len
+          except RuntimeError:
+              import builtins as b
+              result = run()
+          else:
+              try:
+                  raise RuntimeError
+              except RuntimeError:
+                  result = run()
+          ''',
+            'with_break_unreachable_tail': '''from contextlib import nullcontext
+          def run():
+              return getattr(globals()["b"], "eval", lambda _: 3)("1+1")
+          for _ in (0,):
+              with nullcontext():
+                  import builtins as b
+                  break
+                  b = len
           result = run()
           ''',
           }
@@ -88,5 +109,9 @@ jobs:
               exec(compile(src, '<probe>', 'exec', dont_inherit=True), ns)
               return ns.get('result')
           for name, src in cases.items():
-              print(f'{name}: runtime={runtime(src)!r} r62m={r62m(src)!r}')
+              try:
+                  value = runtime(src)
+              except Exception as exc:
+                  value = f'EXC:{type(exc).__name__}:{exc}'
+              print(f'{name}: runtime={value!r} r62n={r62n(src)!r}')
           PY
