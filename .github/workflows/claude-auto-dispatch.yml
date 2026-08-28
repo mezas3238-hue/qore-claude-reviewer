@@ -1,0 +1,56 @@
+name: Claude auto dispatch
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - requests/current.json
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout reviewer infrastructure
+        uses: actions/checkout@v4
+
+      - name: Validate request and dispatch Claude review
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          REQUEST=requests/current.json
+          jq -e '
+            (.pr_number | type == "number") and
+            (.package_id | type == "string" and length > 0) and
+            (.expected_base | type == "string" and length == 40) and
+            (.expected_head | type == "string" and length == 40) and
+            (.expected_synthetic | type == "string" and length == 40) and
+            (.prompt_path | type == "string" and length > 0)
+          ' "$REQUEST" >/dev/null
+          PR_NUMBER="$(jq -r '.pr_number' "$REQUEST")"
+          PACKAGE_ID="$(jq -r '.package_id' "$REQUEST")"
+          EXPECTED_BASE="$(jq -r '.expected_base' "$REQUEST")"
+          EXPECTED_HEAD="$(jq -r '.expected_head' "$REQUEST")"
+          EXPECTED_SYNTHETIC="$(jq -r '.expected_synthetic' "$REQUEST")"
+          PROMPT_PATH="$(jq -r '.prompt_path' "$REQUEST")"
+          test -f "$PROMPT_PATH"
+          case "$PACKAGE_ID" in
+            QORE-*-CLAUDE-*) ;;
+            *) echo "Claude package_id must contain -CLAUDE-." >&2; exit 1 ;;
+          esac
+          echo "Dispatching ${PACKAGE_ID} for qore-core PR #${PR_NUMBER}."
+          gh workflow run claude-qore-review.yml \
+            --ref main \
+            -f "pr_number=${PR_NUMBER}" \
+            -f "package_id=${PACKAGE_ID}" \
+            -f "expected_base=${EXPECTED_BASE}" \
+            -f "expected_head=${EXPECTED_HEAD}" \
+            -f "expected_synthetic=${EXPECTED_SYNTHETIC}" \
+            -f "prompt_path=${PROMPT_PATH}"
+          echo "Claude workflow dispatch accepted."
