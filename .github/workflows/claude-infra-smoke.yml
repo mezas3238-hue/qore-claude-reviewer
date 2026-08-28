@@ -20,10 +20,12 @@ jobs:
         id: app-token
         uses: actions/create-github-app-token@v3
         with:
-          app-id: 4749196
-          private-key: ${{ secrets.QORE_CLAUDE_REVIEWER_PRIVATE_KEY }}
+          client-id: ${{ vars.QORE_CLAUDE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.QORE_CLAUDE_APP_PRIVATE_KEY }}
           owner: mezas3238-hue
           repositories: qore-core
+          permission-contents: read
+          permission-pull-requests: read
 
       - name: Verify qore-core read access
         env:
@@ -54,6 +56,9 @@ jobs:
               payload = json.loads(response.read().decode("utf-8"))
           ids = {row.get("id") for row in payload.get("data", [])}
           if "claude-opus-5" not in ids:
+              print("Available Claude model IDs:")
+              for model_id in sorted(x for x in ids if isinstance(x, str) and x.startswith("claude-")):
+                  print(model_id)
               raise SystemExit("claude-opus-5 is not available to this API key")
           print("Anthropic authentication OK; claude-opus-5 available.")
           PY
