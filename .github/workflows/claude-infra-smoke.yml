@@ -14,39 +14,33 @@ permissions:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
-      - name: Verify Anthropic API key and Claude Opus 5 availability
+      - name: Checkout reviewer infrastructure
+        uses: actions/checkout@v4
+
+      - name: Verify Claude Code OAuth subscription authentication
+        id: claude-oauth
+        uses: anthropics/claude-code-action/base-action@main
+        with:
+          prompt: |
+            This is a credential smoke test only.
+            Do not modify any file and do not run shell commands.
+            Return structured output with status exactly QORE_CLAUDE_OAUTH_OK.
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: >-
+            --max-turns 1
+            --allowedTools "Read"
+            --json-schema '{"type":"object","properties":{"status":{"type":"string","const":"QORE_CLAUDE_OAUTH_OK"}},"required":["status"],"additionalProperties":false}'
+          show_full_output: false
+
+      - name: Verify Claude OAuth smoke result
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          RESULT: ${{ steps.claude-oauth.outputs.structured_output }}
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          import json
-          import os
-          import urllib.request
-
-          key = os.environ.get("ANTHROPIC_API_KEY", "")
-          if not key:
-              raise SystemExit("ANTHROPIC_API_KEY is empty")
-          req = urllib.request.Request(
-              "https://api.anthropic.com/v1/models?limit=100",
-              headers={
-                  "x-api-key": key,
-                  "anthropic-version": "2023-06-01",
-              },
-          )
-          with urllib.request.urlopen(req, timeout=60) as response:
-              payload = json.loads(response.read().decode("utf-8"))
-          ids = {row.get("id") for row in payload.get("data", [])}
-          print("Anthropic authentication OK.")
-          if "claude-opus-5" not in ids:
-              print("Available Claude model IDs:")
-              for model_id in sorted(x for x in ids if isinstance(x, str) and x.startswith("claude-")):
-                  print(model_id)
-              raise SystemExit("claude-opus-5 is not available to this API key")
-          print("claude-opus-5 available.")
-          PY
+          test "$(printf '%s' "$RESULT" | jq -r '.status')" = "QORE_CLAUDE_OAUTH_OK"
+          echo "Claude Code OAuth authentication OK."
 
       - name: Validate configured GitHub App private key locally
         env:
