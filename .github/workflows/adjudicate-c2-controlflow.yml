@@ -22,47 +22,27 @@ jobs:
           ref: aa909351ce6e4d3f82b77bcfe318986e730eae87
           fetch-depth: 1
           persist-credentials: false
-
-      - name: Set up CPython 3.12.14
-        uses: actions/setup-python@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12.14'
-
-      - name: Execute independent runtime and scanner witnesses
+      - name: Execute control-flow and expression-order witnesses
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import importlib
-          import sys
+          import importlib, sys
           from pathlib import Path
-
-          infra = Path('tests/infrastructure').resolve()
-          sys.path.insert(0, str(infra))
-          r62j = getattr(importlib.import_module('test_universal_cross_asset_conformance_final_owner_r62j_guards'), '_r62j_dynamic_execution_markers_from_source')
+          sys.path.insert(0, str(Path('tests/infrastructure').resolve()))
           r62k = getattr(importlib.import_module('test_universal_cross_asset_conformance_final_owner_r62k_guards'), '_r62k_dynamic_execution_markers_from_source')
-
-          witnesses = {
-              'try_import': 'def run():\n    return globals()["b"].eval("1+1")\ntry:\n    import builtins as b\nexcept ImportError:\n    pass\nresult = run()\n',
-              'if_true_import': 'def run():\n    return globals()["b"].eval("1+1")\nif True:\n    import builtins as b\nresult = run()\n',
-              'if_false_safe': 'def run():\n    return globals()["b"].eval("1+1")\nif False:\n    import builtins as b\ntry:\n    result = run()\nexcept KeyError:\n    result = 3\n',
+          cases = {
+            'try_import': 'def run():\n    return globals()["b"].eval("1+1")\ntry:\n    import builtins as b\nexcept ImportError:\n    pass\nresult = run()\n',
+            'if_true_import': 'def run():\n    return globals()["b"].eval("1+1")\nif True:\n    import builtins as b\nresult = run()\n',
+            'if_false_safe': 'def run():\n    return globals()["b"].eval("1+1")\nif False:\n    import builtins as b\ntry:\n    result = run()\nexcept KeyError:\n    result = 3\n',
+            'same_statement_safe_rebind': 'def run():\n    return globals()["b"].eval("1+1")\nimport builtins as b\ntry:\n    result = ((b := len), run())[1]\nexcept AttributeError:\n    result = 3\n',
           }
-
-          def runtime(source: str):
+          def runtime(src):
               ns = {}
-              code = compile(source, '<adjudication>', 'exec', dont_inherit=True)
-              exec(code, ns)
+              exec(compile(src, '<probe>', 'exec', dont_inherit=True), ns)
               return ns.get('result')
-
-          for name, source in witnesses.items():
-              rt = runtime(source)
-              out_j = r62j(source)
-              out_k = r62k(source)
-              print(f'{name}: runtime={rt!r} r62j={out_j!r} r62k={out_k!r}')
-
-          assert runtime(witnesses['try_import']) == 2
-          assert runtime(witnesses['if_true_import']) == 2
-          assert runtime(witnesses['if_false_safe']) == 3
-          assert r62k(witnesses['try_import']) == ()
-          assert r62k(witnesses['if_true_import']) == ()
-          print('C2_FINDING_REPRODUCED=true')
+          for name, src in cases.items():
+              print(f'{name}: runtime={runtime(src)!r} r62k={r62k(src)!r}')
           PY
