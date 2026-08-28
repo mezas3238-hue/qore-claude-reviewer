@@ -29,92 +29,15 @@ jobs:
           sys.path.insert(0, str(Path('tests/infrastructure').resolve()))
           n = importlib.import_module('test_universal_cross_asset_conformance_final_owner_r62n_guards')
           cases = {
-            'safe_explicit': '''import builtins as b
-def run():
-    return getattr(globals()["b"], "eval", lambda _: 3)("1+1")
-try:
-    b = len
-    raise RuntimeError
-except RuntimeError:
-    result = run()
-''',
-            'finalized_safe': '''import builtins as b
-def run():
-    return getattr(globals()["b"], "eval", lambda _: 3)("1+1")
-try:
-    raise RuntimeError
-except RuntimeError:
-    b = len
-finally:
-    result = run()
-''',
-            'for_break_skips_else': '''import builtins as b
-def run():
-    return getattr(globals()["b"], "eval", lambda _: 3)("1+1")
-for _ in (0,):
-    b = len
-    break
-else:
-    import builtins as b
-    result = run()
-result = run()
-''',
-            'handler_type_mismatch': '''import builtins as b
-def run():
-    return getattr(globals()["b"], "eval", lambda _: 3)("1+1")
-try:
-    try:
-        raise ValueError
-    except KeyError:
-        result = run()
-except ValueError:
-    b = len
-    result = run()
-''',
-            'namedexpr_safe_before_raise': '''import builtins as b
-def run():
-    return getattr(globals()["b"], "eval", lambda _: 3)("1+1")
-try:
-    ((b := len), 1 / 0)
-except ZeroDivisionError:
-    result = run()
-''',
-            'namedexpr_danger_before_raise': '''import builtins
-def run():
-    return getattr(globals()["b"], "eval", lambda _: 3)("1+1")
-b = len
-try:
-    ((b := builtins), 1 / 0)
-except ZeroDivisionError:
-    result = run()
-''',
-            'implicit_exception_after_import': '''def run():
-    return getattr(globals()["b"], "eval", lambda _: 3)("1+1")
-try:
-    import builtins as b
-    1 / 0
-except ZeroDivisionError:
-    result = run()
-b = len
-''',
-            'second_iteration_for': '''def run():
-    return getattr(globals()["b"], "eval", lambda _: 3)("1+1")
-b = len
-for _ in (0, 1):
-    result = run()
-    import builtins as b
-b = len
-''',
-            'second_iteration_while': '''def run():
-    return getattr(globals()["b"], "eval", lambda _: 3)("1+1")
-b = len
-i = 0
-while i < 2:
-    result = run()
-    import builtins as b
-    i += 1
-b = len
-''',
+              'safe_explicit': 'import builtins as b\ndef run():\n    return getattr(globals()["b"], "eval", lambda _: 3)("1+1")\ntry:\n    b = len\n    raise RuntimeError\nexcept RuntimeError:\n    result = run()\n',
+              'finalized_safe': 'import builtins as b\ndef run():\n    return getattr(globals()["b"], "eval", lambda _: 3)("1+1")\ntry:\n    raise RuntimeError\nexcept RuntimeError:\n    b = len\nfinally:\n    result = run()\n',
+              'for_break_skips_else': 'import builtins as b\ndef run():\n    return getattr(globals()["b"], "eval", lambda _: 3)("1+1")\nfor _ in (0,):\n    b = len\n    break\nelse:\n    import builtins as b\n    result = run()\nresult = run()\n',
+              'handler_type_mismatch': 'import builtins as b\ndef run():\n    return getattr(globals()["b"], "eval", lambda _: 3)("1+1")\ntry:\n    try:\n        raise ValueError\n    except KeyError:\n        result = run()\nexcept ValueError:\n    b = len\n    result = run()\n',
+              'namedexpr_safe_before_raise': 'import builtins as b\ndef run():\n    return getattr(globals()["b"], "eval", lambda _: 3)("1+1")\ntry:\n    ((b := len), 1 / 0)\nexcept ZeroDivisionError:\n    result = run()\n',
+              'namedexpr_danger_before_raise': 'import builtins\ndef run():\n    return getattr(globals()["b"], "eval", lambda _: 3)("1+1")\nb = len\ntry:\n    ((b := builtins), 1 / 0)\nexcept ZeroDivisionError:\n    result = run()\n',
+              'implicit_exception_after_import': 'def run():\n    return getattr(globals()["b"], "eval", lambda _: 3)("1+1")\ntry:\n    import builtins as b\n    1 / 0\nexcept ZeroDivisionError:\n    result = run()\nb = len\n',
+              'second_iteration_for': 'def run():\n    return getattr(globals()["b"], "eval", lambda _: 3)("1+1")\nb = len\nfor _ in (0, 1):\n    result = run()\n    import builtins as b\nb = len\n',
+              'second_iteration_while': 'def run():\n    return getattr(globals()["b"], "eval", lambda _: 3)("1+1")\nb = len\ni = 0\nwhile i < 2:\n    result = run()\n    import builtins as b\n    i += 1\nb = len\n',
           }
           def runtime(src):
               ns = {}
