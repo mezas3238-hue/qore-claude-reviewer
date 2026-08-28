@@ -1,4 +1,4 @@
-name: Inspect R62N flow state
+name: Probe R62N observable namespace repair
 
 on:
   push:
@@ -14,52 +14,116 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: mezas3238-hue/qore-core
-          ref: 72bc45153fd8b15834f2d50951b473ae93f30824
+          ref: aaa0a680a127fe0aa01131cb97125033d78f68a3
           fetch-depth: 1
           persist-credentials: false
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12.14'
-      - name: Inspect R62N abstract flow
+      - name: Execute R62N precision matrix
         run: |
+          set -euo pipefail
           python3 - <<'PY'
           import importlib, sys
           from pathlib import Path
           sys.path.insert(0, str(Path('tests/infrastructure').resolve()))
           n = importlib.import_module('test_universal_cross_asset_conformance_final_owner_r62n_guards')
-          k = importlib.import_module('test_universal_cross_asset_conformance_final_owner_r62k_guards')
-          j = importlib.import_module('test_universal_cross_asset_conformance_final_owner_r62j_guards')
           cases = {
-          'safe_explicit': '''import builtins as b
-          def run():
-              return getattr(globals()["b"], "eval", lambda _: 3)("1+1")
-          try:
-              b = len
-              raise RuntimeError
-          except RuntimeError:
-              result = run()
-          ''',
-          'for_break': '''import builtins as b
-          def run():
-              return getattr(globals()["b"], "eval", lambda _: 3)("1+1")
-          for _ in (0,):
-              b = len
-              break
-          else:
-              import builtins as b
-              result = run()
-          result = run()
-          ''',
+            'safe_explicit': '''import builtins as b
+def run():
+    return getattr(globals()["b"], "eval", lambda _: 3)("1+1")
+try:
+    b = len
+    raise RuntimeError
+except RuntimeError:
+    result = run()
+''',
+            'finalized_safe': '''import builtins as b
+def run():
+    return getattr(globals()["b"], "eval", lambda _: 3)("1+1")
+try:
+    raise RuntimeError
+except RuntimeError:
+    b = len
+finally:
+    result = run()
+''',
+            'for_break_skips_else': '''import builtins as b
+def run():
+    return getattr(globals()["b"], "eval", lambda _: 3)("1+1")
+for _ in (0,):
+    b = len
+    break
+else:
+    import builtins as b
+    result = run()
+result = run()
+''',
+            'handler_type_mismatch': '''import builtins as b
+def run():
+    return getattr(globals()["b"], "eval", lambda _: 3)("1+1")
+try:
+    try:
+        raise ValueError
+    except KeyError:
+        result = run()
+except ValueError:
+    b = len
+    result = run()
+''',
+            'namedexpr_safe_before_raise': '''import builtins as b
+def run():
+    return getattr(globals()["b"], "eval", lambda _: 3)("1+1")
+try:
+    ((b := len), 1 / 0)
+except ZeroDivisionError:
+    result = run()
+''',
+            'namedexpr_danger_before_raise': '''import builtins
+def run():
+    return getattr(globals()["b"], "eval", lambda _: 3)("1+1")
+b = len
+try:
+    ((b := builtins), 1 / 0)
+except ZeroDivisionError:
+    result = run()
+''',
+            'implicit_exception_after_import': '''def run():
+    return getattr(globals()["b"], "eval", lambda _: 3)("1+1")
+try:
+    import builtins as b
+    1 / 0
+except ZeroDivisionError:
+    result = run()
+b = len
+''',
+            'second_iteration_for': '''def run():
+    return getattr(globals()["b"], "eval", lambda _: 3)("1+1")
+b = len
+for _ in (0, 1):
+    result = run()
+    import builtins as b
+b = len
+''',
+            'second_iteration_while': '''def run():
+    return getattr(globals()["b"], "eval", lambda _: 3)("1+1")
+b = len
+i = 0
+while i < 2:
+    result = run()
+    import builtins as b
+    i += 1
+b = len
+''',
           }
+          def runtime(src):
+              ns = {}
+              exec(compile(src, '<probe>', 'exec', dont_inherit=True), ns)
+              return ns.get('result')
           for name, src in cases.items():
-              flow = n._r62n_flow(src)
-              print('CASE', name)
-              print('precision', flow[2])
-              print('owner_by_call', k._r62k_top_level_owner_calls(src))
-              print('escaped', k._r62k_escaped_owners(src))
-              print('observations', flow[0])
-              print('timeline', flow[1])
-              print('fallback', n._r62n_future_authority_by_call(src, flow[1]))
-              print('observable', n._r62n_observable_authority_by_call(src))
-              print('markers', n._r62n_dynamic_execution_markers_from_source(src))
+              try:
+                  value = runtime(src)
+              except Exception as exc:
+                  value = f'EXC:{type(exc).__name__}:{exc}'
+              print(f'{name}: runtime={value!r} r62n={n._r62n_dynamic_execution_markers_from_source(src)!r}')
           PY
