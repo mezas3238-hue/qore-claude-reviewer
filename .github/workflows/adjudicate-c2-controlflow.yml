@@ -1,11 +1,13 @@
-name: Probe R62N observable namespace repair
+name: Audit R62N adjacent control-flow precision
 
 on:
   push:
     branches: [main]
     paths: [.github/workflows/adjudicate-c2-controlflow.yml]
+
 permissions:
   contents: read
+
 jobs:
   probe:
     runs-on: ubuntu-latest
@@ -14,39 +16,18 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: mezas3238-hue/qore-core
-          ref: aaa0a680a127fe0aa01131cb97125033d78f68a3
+          ref: d470860e56af4fed3dacadde8a39152f07fbca51
           fetch-depth: 1
           persist-credentials: false
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12.14'
-      - name: Execute R62N precision matrix
+      - name: Execute adversarial matrix
+        env:
+          PROBE_ZLIB_B64: 'eNrVmVuP4zQUgN/7K0xfkixVt10kHiIGaVkGHkAjtCCEmI4sJzlpzSR2ZDszLd3+d45z62V7G3XSLH1J6ts537n4Fp5mUhnCi0fCgwHRC92LlUxJxswMS6o68hv+7WHl0JYPudCgjDvC9ka5ts51DGij33IRK4aFeWhyBY43VKBl8gSu53k9QW7WsoblG01llCdQ9qe54E+gNEtoqKTWlGkNhoZSxFKlTIRAYy6wVj4LUFR9+07Qac5UpB2vFzINGiUsHZhnCQ+5oQEWUc1icHziVCRBzhODAIRpEkxEBDFRuXA9fyII/hSg4oJMwTCDbNNEBizRrnffD/oPA9KHJ5b0ByRhaRAxQn3yjef2x1+P+95EGLWoR2FcA/kFFrdKSTURMA8hM+RXKR/zrCirGgaocAKilq3zxGBJodBEOAPixFyhXVJmwlmHJH+yJIdtltviwaU4h6Tqsx6m6rSf5JAtTJ4l8AXZYoPMrX092Kj3znUyQpQBm3LdHd6WmmPylowavJruxW6r+v8NSv7In7jGeHlR+DeWKfI+WXxphjkJVuntH4lqtdCGKRoxMQVl2dqM3iZtf1Yyz9z+HDveb4b0Q+O1N5fka2OATcTukvYy7JNhiuIoJLjYtO3ERpMq/j7mwvB0v7JWoYv9VmJ1mnWHUfers8G9d0qJacwsVCBlckUyHpOf2EUuOUrDhbkuzOjVQXDbWHK0k0Wo8/iyfMBdKFVWN/ovzvtXNDcKJpRwQQrp7sh7XduvuaSA7rDGZ2+Y1gqbZ9lSuKyX8G0t33kHJpfDDvksiCDNzIKW+9kOzO2+cvw8zziClPPQ9XAKqW3MqSVOMRsFCtjj1Zn+QNH7UqHQ5hjqPho8PWMLZNlaydvNFHc0OB1itWJbK/bJ1H/mZla5ZZ33xZWFHQ/mZuPWQuRJUpW2lUlrUKvYpsRG0HEr7Ph1ywYH+WsvnsN9haA9RH7SmYKlEME8UzTEUxJT0zNSTXPx6L7BtnpH9ztcvNrajBZC3YD4BZA3KI+Bpw+4x6EjHppO9tbLNYpfoqwuRGFa86noBGaOOr2+b5gQXTL5pNgd3MvgHwjNgJTPh3ZQtb3O7YSzFL3NVKzo3v34ocF6X7R6EVM9n6zXiB2sq08mzWS4d1ap1brMp/UtWUlNA8CFqp01f/eCZfN0/vIj+/Fbsq2lxGLOmIgSqK/MqJmB+B9AHj9ernqV5nYwV6vQ83u2hyi+aayKd6tPr94lwBxCN5RphjtG2x7t8h3LI26+tyaytfiMcEXGI/UMFDc3dluJ8YVB1gxSWUfoIRrIdUr1nLK+4vuBaWiuzywKlvu7A8TO7V8f/KVZZOBivTek1OYipSt/if9XTs9umWzRgKCudutUfK8ZcgMpeqMc8MlevJXGaazwOXjK1CMoaxYxLL8BRQscmYfUQudWTVq1oXaDRLXMVbgx2llgaylu7Pz+4f3d3e1HegJyUI6fKS4M9lra2tWniuZmWeB9pVafqrFvltULlqHN/wPDrvkw'
         run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import importlib, sys
-          from pathlib import Path
-          sys.path.insert(0, str(Path('tests/infrastructure').resolve()))
-          n = importlib.import_module('test_universal_cross_asset_conformance_final_owner_r62n_guards')
-          cases = {
-              'safe_explicit': 'import builtins as b\ndef run():\n    return getattr(globals()["b"], "eval", lambda _: 3)("1+1")\ntry:\n    b = len\n    raise RuntimeError\nexcept RuntimeError:\n    result = run()\n',
-              'finalized_safe': 'import builtins as b\ndef run():\n    return getattr(globals()["b"], "eval", lambda _: 3)("1+1")\ntry:\n    raise RuntimeError\nexcept RuntimeError:\n    b = len\nfinally:\n    result = run()\n',
-              'for_break_skips_else': 'import builtins as b\ndef run():\n    return getattr(globals()["b"], "eval", lambda _: 3)("1+1")\nfor _ in (0,):\n    b = len\n    break\nelse:\n    import builtins as b\n    result = run()\nresult = run()\n',
-              'handler_type_mismatch': 'import builtins as b\ndef run():\n    return getattr(globals()["b"], "eval", lambda _: 3)("1+1")\ntry:\n    try:\n        raise ValueError\n    except KeyError:\n        result = run()\nexcept ValueError:\n    b = len\n    result = run()\n',
-              'namedexpr_safe_before_raise': 'import builtins as b\ndef run():\n    return getattr(globals()["b"], "eval", lambda _: 3)("1+1")\ntry:\n    ((b := len), 1 / 0)\nexcept ZeroDivisionError:\n    result = run()\n',
-              'namedexpr_danger_before_raise': 'import builtins\ndef run():\n    return getattr(globals()["b"], "eval", lambda _: 3)("1+1")\nb = len\ntry:\n    ((b := builtins), 1 / 0)\nexcept ZeroDivisionError:\n    result = run()\n',
-              'implicit_exception_after_import': 'def run():\n    return getattr(globals()["b"], "eval", lambda _: 3)("1+1")\ntry:\n    import builtins as b\n    1 / 0\nexcept ZeroDivisionError:\n    result = run()\nb = len\n',
-              'second_iteration_for': 'def run():\n    return getattr(globals()["b"], "eval", lambda _: 3)("1+1")\nb = len\nfor _ in (0, 1):\n    result = run()\n    import builtins as b\nb = len\n',
-              'second_iteration_while': 'def run():\n    return getattr(globals()["b"], "eval", lambda _: 3)("1+1")\nb = len\ni = 0\nwhile i < 2:\n    result = run()\n    import builtins as b\n    i += 1\nb = len\n',
-          }
-          def runtime(src):
-              ns = {}
-              exec(compile(src, '<probe>', 'exec', dont_inherit=True), ns)
-              return ns.get('result')
-          for name, src in cases.items():
-              try:
-                  value = runtime(src)
-              except Exception as exc:
-                  value = f'EXC:{type(exc).__name__}:{exc}'
-              print(f'{name}: runtime={value!r} r62n={n._r62n_dynamic_execution_markers_from_source(src)!r}')
+          python - <<'PY'
+          import base64, os, zlib
+          script = zlib.decompress(base64.b64decode(os.environ['PROBE_ZLIB_B64'])).decode('utf-8')
+          exec(compile(script, '<r62n-adversarial-audit>', 'exec'))
           PY
