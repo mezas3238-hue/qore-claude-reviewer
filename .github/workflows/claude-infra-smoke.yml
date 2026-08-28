@@ -30,11 +30,31 @@ jobs:
           CLEAN_TOKEN="$(printf '%s' "$CLAUDE_CODE_OAUTH_TOKEN_RAW" | tr -d '\r\n')"
           test -n "$CLEAN_TOKEN"
           export CLAUDE_CODE_OAUTH_TOKEN="$CLEAN_TOKEN"
-          unset CLAUDE_CODE_OAUTH_TOKEN_RAW CLEAN_TOKEN
+          set +e
           claude -p 'Reply exactly QORE_CLAUDE_OAUTH_OK' \
             --max-turns 3 \
             --allowedTools Read \
-            --output-format json > "$RUNNER_TEMP/claude-oauth-smoke.json"
+            --output-format json \
+            > "$RUNNER_TEMP/claude-oauth-smoke.json" \
+            2> "$RUNNER_TEMP/claude-oauth-smoke.err"
+          STATUS=$?
+          set -e
+          if [ "$STATUS" -ne 0 ]; then
+            RAW="$CLAUDE_CODE_OAUTH_TOKEN_RAW" CLEAN="$CLEAN_TOKEN" \
+              python3 - "$RUNNER_TEMP/claude-oauth-smoke.err" <<'PY'
+          import os
+          import pathlib
+          import sys
+
+          text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace")
+          for secret in (os.environ.get("RAW", ""), os.environ.get("CLEAN", "")):
+              if secret:
+                  text = text.replace(secret, "[REDACTED]")
+          print(text)
+          PY
+            exit "$STATUS"
+          fi
+          unset CLAUDE_CODE_OAUTH_TOKEN_RAW CLEAN_TOKEN CLAUDE_CODE_OAUTH_TOKEN
           python3 - "$RUNNER_TEMP/claude-oauth-smoke.json" <<'PY'
           import json
           import pathlib
@@ -48,7 +68,7 @@ jobs:
               raise SystemExit(f"Unexpected Claude result: {result!r}")
           print("Claude Code OAuth subscription authentication OK.")
           PY
-          rm -f "$RUNNER_TEMP/claude-oauth-smoke.json"
+          rm -f "$RUNNER_TEMP/claude-oauth-smoke.json" "$RUNNER_TEMP/claude-oauth-smoke.err"
 
       - name: Validate configured GitHub App private key locally
         env:
