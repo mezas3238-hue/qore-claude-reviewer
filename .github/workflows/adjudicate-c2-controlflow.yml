@@ -1,4 +1,4 @@
-name: Audit R62N adjacent control-flow precision
+name: Probe R62N ordering and exception adjacencies
 
 on:
   push:
@@ -16,18 +16,18 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: mezas3238-hue/qore-core
-          ref: d470860e56af4fed3dacadde8a39152f07fbca51
+          ref: f5f62da1fb5367cd050b36be6fe59758ccde5f22
           fetch-depth: 1
           persist-credentials: false
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12.14'
-      - name: Execute adversarial matrix
+      - name: Execute ordering and exception matrix
         env:
-          PROBE_ZLIB_B64: 'eNrVmVuP4zQUgN/7K0xfkixVt10kHiIGaVkGHkAjtCCEmI4sJzlpzSR2ZDszLd3+d45z62V7G3XSLH1J6ts537n4Fp5mUhnCi0fCgwHRC92LlUxJxswMS6o68hv+7WHl0JYPudCgjDvC9ka5ts51DGij33IRK4aFeWhyBY43VKBl8gSu53k9QW7WsoblG01llCdQ9qe54E+gNEtoqKTWlGkNhoZSxFKlTIRAYy6wVj4LUFR9+07Qac5UpB2vFzINGiUsHZhnCQ+5oQEWUc1icHziVCRBzhODAIRpEkxEBDFRuXA9fyII/hSg4oJMwTCDbNNEBizRrnffD/oPA9KHJ5b0ByRhaRAxQn3yjef2x1+P+95EGLWoR2FcA/kFFrdKSTURMA8hM+RXKR/zrCirGgaocAKilq3zxGBJodBEOAPixFyhXVJmwlmHJH+yJIdtltviwaU4h6Tqsx6m6rSf5JAtTJ4l8AXZYoPMrX092Kj3znUyQpQBm3LdHd6WmmPylowavJruxW6r+v8NSv7In7jGeHlR+DeWKfI+WXxphjkJVuntH4lqtdCGKRoxMQVl2dqM3iZtf1Yyz9z+HDveb4b0Q+O1N5fka2OATcTukvYy7JNhiuIoJLjYtO3ERpMq/j7mwvB0v7JWoYv9VmJ1mnWHUfers8G9d0qJacwsVCBlckUyHpOf2EUuOUrDhbkuzOjVQXDbWHK0k0Wo8/iyfMBdKFVWN/ovzvtXNDcKJpRwQQrp7sh7XduvuaSA7rDGZ2+Y1gqbZ9lSuKyX8G0t33kHJpfDDvksiCDNzIKW+9kOzO2+cvw8zziClPPQ9XAKqW3MqSVOMRsFCtjj1Zn+QNH7UqHQ5hjqPho8PWMLZNlaydvNFHc0OB1itWJbK/bJ1H/mZla5ZZ33xZWFHQ/mZuPWQuRJUpW2lUlrUKvYpsRG0HEr7Ph1ywYH+WsvnsN9haA9RH7SmYKlEME8UzTEUxJT0zNSTXPx6L7BtnpH9ztcvNrajBZC3YD4BZA3KI+Bpw+4x6EjHppO9tbLNYpfoqwuRGFa86noBGaOOr2+b5gQXTL5pNgd3MvgHwjNgJTPh3ZQtb3O7YSzFL3NVKzo3v34ocF6X7R6EVM9n6zXiB2sq08mzWS4d1ap1brMp/UtWUlNA8CFqp01f/eCZfN0/vIj+/Fbsq2lxGLOmIgSqK/MqJmB+B9AHj9ernqV5nYwV6vQ83u2hyi+aayKd6tPr94lwBxCN5RphjtG2x7t8h3LI26+tyaytfiMcEXGI/UMFDc3dluJ8YVB1gxSWUfoIRrIdUr1nLK+4vuBaWiuzywKlvu7A8TO7V8f/KVZZOBivTek1OYipSt/if9XTs9umWzRgKCudutUfK8ZcgMpeqMc8MlevJXGaazwOXjK1CMoaxYxLL8BRQscmYfUQudWTVq1oXaDRLXMVbgx2llgaylu7Pz+4f3d3e1HegJyUI6fKS4M9lra2tWniuZmWeB9pVafqrFvltULlqHN/wPDrvkw'
+          PROBE_ZLIB_B64: 'eNrVl91P2zAQwN/zV3iWJhJWFcqkPVTrpH2wPexlD2iahpDlJJdiltjR2enalf7vOydp2kKBigEaeYlj+z5+d8nlHKiiNOhYc8tVHLQTdmaDDE3BSunOab7dwb7RY0CLfT/fV9oCuvCwx6zD0K+F3IF19kDpDCVNVomrEHjUR7Amn0AYRVGg2Whlsd+MRGHSKodGXlRaTQCtzEWCxlohrQUnEqMzg4XUCYhMaVo1vzWgwDdHWowrianlURAk0oIlE/OA0cUTU5Q5TEWWG4Opmgg3KwEQDYpU6jEgH7K9vb0UMoaVDqNhLYZAjms2BicdsY1zE8vchtEpj/lZj3GYyJz3WC6LOJVMDNnrKOSDVwNywOGs0TG4YAcH7PAigGkCpWMnZPjYG26W25DGlcodRZJJy+LWtq1yRwS1P0vpn4Dmk5ooq4xe0xLTvhz0NkGi6m3GgIL8pPgv/yt6n/w/pOcp8r4GfoPruwZgibjikVrTB6HGWtDIkKOkWMjM0adA3lWwwXfFTKfu4binQxbGbDjqbERkImymyFLUY4PodHAW/DuXlRk8OZVHWAF1jDdQrdFYXxwF1UAQhR0LIhLeXiUdpHemqHt4OKLGIXZCDvXW2HbIy60kT5mULQhdQu7MREZWGoDd0/Cw7ncVouX47D26DtLWjff1ps2isWuutrHenqhHeOFuxa1fvd1JV4Sk1TqJopQkQj1AppA6hkcu6SiVBXZcu0t+fkFTlSGfktjpd1+aasdDKgpfYdaOz5Z4+2y15T7/vv1O6eY/73ryr4bGArVM6fOKzZJqO/v9f5rL2MTGnd/8KTQKn3mQ7mqKFktApwoILSYtp6675kU97hz3F0whCX0XpfJ6PzG/LdHEcPSOe35apntqtBNKnwMqN/Ilmmh8OVtqacOobZ8iGfLGM96st4XgA7XuXYx8Lmh+eFVBxo9/fBzOfR8b0nrUF0LLAoRYDOf0vOABnRKYn6JzCSZMaVYfCfrKQWGXSS1RaRdmfO43Li7baIzm62F5gYvLQuIvOoqM5rrfHDTSGUmoRHjqqm5R2i3CH5iENRUmnTjh/QXo7zRN'
         run: |
           python - <<'PY'
           import base64, os, zlib
           script = zlib.decompress(base64.b64decode(os.environ['PROBE_ZLIB_B64'])).decode('utf-8')
-          exec(compile(script, '<r62n-adversarial-audit>', 'exec'))
+          exec(compile(script, '<r62n-ordering-probe>', 'exec'))
           PY
