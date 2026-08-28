@@ -1,0 +1,59 @@
+name: Claude infrastructure smoke
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/claude-infra-smoke.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Create QORE Claude Reviewer installation token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.QORE_CLAUDE_REVIEWER_APP_ID }}
+          private-key: ${{ secrets.QORE_CLAUDE_REVIEWER_PRIVATE_KEY }}
+          owner: mezas3238-hue
+          repositories: qore-core
+
+      - name: Verify qore-core read access
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          gh api repos/mezas3238-hue/qore-core/pulls/461 \
+            --jq '{number,state,merged,base:.base.sha,head:.head.sha}'
+
+      - name: Verify Anthropic API key and Claude Opus 5 availability
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          req = urllib.request.Request(
+              "https://api.anthropic.com/v1/models?limit=100",
+              headers={
+                  "x-api-key": os.environ["ANTHROPIC_API_KEY"],
+                  "anthropic-version": "2023-06-01",
+              },
+          )
+          with urllib.request.urlopen(req, timeout=60) as response:
+              payload = json.loads(response.read().decode("utf-8"))
+          ids = {row.get("id") for row in payload.get("data", [])}
+          if "claude-opus-5" not in ids:
+              raise SystemExit("claude-opus-5 is not available to this API key")
+          print("Anthropic authentication OK; claude-opus-5 available.")
+          PY
