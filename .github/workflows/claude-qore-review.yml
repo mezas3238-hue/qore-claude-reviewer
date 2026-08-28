@@ -45,10 +45,12 @@ jobs:
         id: app-token
         uses: actions/create-github-app-token@v3
         with:
-          app-id: 4749196
-          private-key: ${{ secrets.QORE_CLAUDE_REVIEWER_PRIVATE_KEY }}
+          client-id: ${{ vars.QORE_CLAUDE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.QORE_CLAUDE_APP_PRIVATE_KEY }}
           owner: mezas3238-hue
           repositories: qore-core
+          permission-contents: read
+          permission-pull-requests: read
 
       - name: Verify live PR binding before checkout
         env:
@@ -125,7 +127,7 @@ jobs:
           set -euo pipefail
           python3 scripts/claude_reviewer.py
 
-      - name: Verify frozen HEAD again before publishing
+      - name: Verify frozen HEAD again after review
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           PR_NUMBER: ${{ inputs.pr_number }}
@@ -133,39 +135,35 @@ jobs:
         run: |
           set -euo pipefail
           LIVE_HEAD="$(gh api "repos/mezas3238-hue/qore-core/pulls/${PR_NUMBER}" --jq '.head.sha')"
-          echo "Pre-publication HEAD: ${LIVE_HEAD}"
+          echo "Post-review HEAD: ${LIVE_HEAD}"
           test "$LIVE_HEAD" = "$EXPECTED_HEAD"
 
-      - name: Publish Claude review on exact HEAD
+      - name: Expose Claude review evidence
+        if: ${{ always() }}
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          PR_NUMBER: ${{ inputs.pr_number }}
-          EXPECTED_HEAD: ${{ inputs.expected_head }}
           PACKAGE_ID: ${{ inputs.package_id }}
+          EXPECTED_HEAD: ${{ inputs.expected_head }}
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          import json
-          import os
-          from pathlib import Path
+          echo "Claude package: ${PACKAGE_ID}"
+          echo "Frozen HEAD: ${EXPECTED_HEAD}"
+          if test -f claude-review.md; then
+            echo "----- BEGIN CLAUDE REVIEW -----"
+            cat claude-review.md
+            echo "----- END CLAUDE REVIEW -----"
+          else
+            echo "Claude review output absent."
+          fi
 
-          review = Path("claude-review.md").read_text(encoding="utf-8")
-          body = (
-              f"<!-- QORE-CLAUDE-REVIEW package={os.environ['PACKAGE_ID']} "
-              f"head={os.environ['EXPECTED_HEAD']} -->\n\n" + review
-          )
-          payload = {
-              "body": body,
-              "event": "COMMENT",
-              "commit_id": os.environ["EXPECTED_HEAD"],
-          }
-          Path("review-payload.json").write_text(json.dumps(payload), encoding="utf-8")
-          PY
-          gh api --method POST \
-            "repos/mezas3238-hue/qore-core/pulls/${PR_NUMBER}/reviews" \
-            --input review-payload.json \
-            --jq '{id: .id, state: .state, user: .user.login, commit_id: .commit_id}'
+      - name: Upload Claude review evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-${{ inputs.package_id }}
+          path: claude-review.md
+          if-no-files-found: warn
+          retention-days: 30
 
       - name: Review complete
         if: ${{ always() }}
-        run: echo "Claude workflow completed."
+        run: echo "Claude read-only workflow completed."
