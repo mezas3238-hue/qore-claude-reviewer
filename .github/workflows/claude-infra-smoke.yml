@@ -16,22 +16,39 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Checkout reviewer infrastructure
-        uses: actions/checkout@v4
+      - name: Install Claude Code
+        run: |
+          set -euo pipefail
+          curl -fsSL https://claude.ai/install.sh | bash -s -- 2.1.251
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Verify Claude Code OAuth subscription authentication
-        id: claude-oauth
-        uses: anthropics/claude-code-action/base-action@main
-        with:
-          prompt: |
-            This is a credential smoke test only.
-            Do not modify any file and do not run any tool.
-            Reply exactly: QORE_CLAUDE_OAUTH_OK
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          claude_args: >-
-            --max-turns 3
-            --allowedTools "Read"
-          show_full_output: true
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN_RAW: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+          CLEAN_TOKEN="$(printf '%s' "$CLAUDE_CODE_OAUTH_TOKEN_RAW" | tr -d '\r\n')"
+          test -n "$CLEAN_TOKEN"
+          export CLAUDE_CODE_OAUTH_TOKEN="$CLEAN_TOKEN"
+          unset CLAUDE_CODE_OAUTH_TOKEN_RAW CLEAN_TOKEN
+          claude -p 'Reply exactly QORE_CLAUDE_OAUTH_OK' \
+            --max-turns 3 \
+            --allowedTools Read \
+            --output-format json > "$RUNNER_TEMP/claude-oauth-smoke.json"
+          python3 - "$RUNNER_TEMP/claude-oauth-smoke.json" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          payload = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+          if payload.get("is_error"):
+              raise SystemExit(f"Claude Code OAuth smoke failed: {payload.get('result')}")
+          result = str(payload.get("result", "")).strip()
+          if "QORE_CLAUDE_OAUTH_OK" not in result:
+              raise SystemExit(f"Unexpected Claude result: {result!r}")
+          print("Claude Code OAuth subscription authentication OK.")
+          PY
+          rm -f "$RUNNER_TEMP/claude-oauth-smoke.json"
 
       - name: Validate configured GitHub App private key locally
         env:
