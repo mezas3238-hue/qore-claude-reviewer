@@ -27,13 +27,13 @@ jobs:
           CLAUDE_CODE_OAUTH_TOKEN_RAW: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
           set -euo pipefail
-          CLEAN_TOKEN="$(printf '%s' "$CLAUDE_CODE_OAUTH_TOKEN_RAW" | tr -d '\r\n')"
+          CLEAN_TOKEN="$(printf '%s' "$CLAUDE_CODE_OAUTH_TOKEN_RAW" | tr -d '[:space:]')"
           test -n "$CLEAN_TOKEN"
           RAW_LEN="${#CLAUDE_CODE_OAUTH_TOKEN_RAW}"
           CLEAN_LEN="${#CLEAN_TOKEN}"
-          RAW_LINES="$(printf '%s' "$CLAUDE_CODE_OAUTH_TOKEN_RAW" | awk 'END{print NR}')"
-          OTHER_WS="$(printf '%s' "$CLEAN_TOKEN" | grep -o '[[:space:]]' | wc -l || true)"
-          echo "OAuth token structural check: raw_len=${RAW_LEN}; clean_len=${CLEAN_LEN}; raw_lines=${RAW_LINES}; remaining_whitespace=${OTHER_WS}"
+          REMAINING_WS="$(printf '%s' "$CLEAN_TOKEN" | grep -o '[[:space:]]' | wc -l || true)"
+          echo "OAuth token structural check: raw_len=${RAW_LEN}; clean_len=${CLEAN_LEN}; remaining_whitespace=${REMAINING_WS}"
+          test "$REMAINING_WS" = "0"
           export CLAUDE_CODE_OAUTH_TOKEN="$CLEAN_TOKEN"
           set +e
           claude -p 'Reply exactly QORE_CLAUDE_OAUTH_OK' \
