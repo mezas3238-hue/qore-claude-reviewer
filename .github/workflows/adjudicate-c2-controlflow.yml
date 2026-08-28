@@ -42,32 +42,9 @@ jobs:
           r62k = getattr(importlib.import_module('test_universal_cross_asset_conformance_final_owner_r62k_guards'), '_r62k_dynamic_execution_markers_from_source')
 
           witnesses = {
-              'try_import': '''\
-def run():
-    return globals()["b"].eval("1+1")
-try:
-    import builtins as b
-except ImportError:
-    pass
-result = run()
-''',
-              'if_true_import': '''\
-def run():
-    return globals()["b"].eval("1+1")
-if True:
-    import builtins as b
-result = run()
-''',
-              'if_false_safe': '''\
-def run():
-    return globals()["b"].eval("1+1")
-if False:
-    import builtins as b
-try:
-    result = run()
-except KeyError:
-    result = 3
-''',
+              'try_import': 'def run():\n    return globals()["b"].eval("1+1")\ntry:\n    import builtins as b\nexcept ImportError:\n    pass\nresult = run()\n',
+              'if_true_import': 'def run():\n    return globals()["b"].eval("1+1")\nif True:\n    import builtins as b\nresult = run()\n',
+              'if_false_safe': 'def run():\n    return globals()["b"].eval("1+1")\nif False:\n    import builtins as b\ntry:\n    result = run()\nexcept KeyError:\n    result = 3\n',
           }
 
           def runtime(source: str):
