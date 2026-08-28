@@ -1,4 +1,4 @@
-name: Adjudicate R62M implicit and repeated flow
+name: Adjudicate R62M adjacent flow
 
 on:
   push:
@@ -20,7 +20,7 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12.14'
-      - name: Execute R62M edge witnesses
+      - name: Execute R62M adjacent witnesses
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -29,14 +29,32 @@ jobs:
           sys.path.insert(0, str(Path('tests/infrastructure').resolve()))
           r62m = getattr(importlib.import_module('test_universal_cross_asset_conformance_final_owner_r62m_guards'), '_r62m_dynamic_execution_markers_from_source')
           cases = {
-            'implicit_exception_after_walrus': '''import builtins
-          def run():
-              return globals()["b"].eval("1+1")
+            'implicit_exception_after_import': '''def run():
+              return getattr(globals()["b"], "eval", lambda _: 3)("1+1")
           try:
-              ((b := builtins), 1 / 0)
+              import builtins as b
+              1 / 0
           except ZeroDivisionError:
               result = run()
           b = len
+          ''',
+            'safe_rebind_before_explicit_raise': '''import builtins as b
+          def run():
+              return getattr(globals()["b"], "eval", lambda _: 3)("1+1")
+          try:
+              b = len
+              raise RuntimeError
+          except RuntimeError:
+              result = run()
+          ''',
+            'safe_rebind_before_implicit_raise': '''import builtins as b
+          def run():
+              return getattr(globals()["b"], "eval", lambda _: 3)("1+1")
+          try:
+              b = len
+              1 / 0
+          except ZeroDivisionError:
+              result = run()
           ''',
             'second_iteration_observation': '''def run():
               return getattr(globals()["b"], "eval", lambda _: 3)("1+1")
@@ -46,13 +64,15 @@ jobs:
               import builtins as b
           b = len
           ''',
-            'continue_skips_safe_rebind': '''def run():
-              return globals()["b"].eval("1+1")
-          for _ in (0,):
+            'while_second_iteration_observation': '''def run():
+              return getattr(globals()["b"], "eval", lambda _: 3)("1+1")
+          b = len
+          i = 0
+          while i < 2:
+              result = run()
               import builtins as b
-              continue
-              b = len
-          result = run()
+              i += 1
+          b = len
           ''',
             'safe_single_iteration': '''def run():
               return getattr(globals()["b"], "eval", lambda _: 3)("1+1")
