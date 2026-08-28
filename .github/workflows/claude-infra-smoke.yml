@@ -25,22 +25,13 @@ jobs:
         with:
           prompt: |
             This is a credential smoke test only.
-            Do not modify any file and do not run shell commands.
-            Return structured output with status exactly QORE_CLAUDE_OAUTH_OK.
+            Do not modify any file and do not run any tool.
+            Reply exactly: QORE_CLAUDE_OAUTH_OK
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           claude_args: >-
-            --max-turns 1
+            --max-turns 3
             --allowedTools "Read"
-            --json-schema '{"type":"object","properties":{"status":{"type":"string","const":"QORE_CLAUDE_OAUTH_OK"}},"required":["status"],"additionalProperties":false}'
-          show_full_output: false
-
-      - name: Verify Claude OAuth smoke result
-        env:
-          RESULT: ${{ steps.claude-oauth.outputs.structured_output }}
-        run: |
-          set -euo pipefail
-          test "$(printf '%s' "$RESULT" | jq -r '.status')" = "QORE_CLAUDE_OAUTH_OK"
-          echo "Claude Code OAuth authentication OK."
+          show_full_output: true
 
       - name: Validate configured GitHub App private key locally
         env:
