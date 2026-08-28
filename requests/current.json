@@ -1,8 +1,8 @@
 {
   "pr_number": 461,
-  "package_id": "QORE-UMI14-UMI12-FINAL-OWNER-RECERT-001-CLAUDE-C1",
+  "package_id": "QORE-UMI14-UMI12-FINAL-OWNER-RECERT-001-CLAUDE-C2",
   "expected_base": "ebd0adf000874797653df92ea1c08a892cce6c8c",
   "expected_head": "aa909351ce6e4d3f82b77bcfe318986e730eae87",
   "expected_synthetic": "ac9f79bf18a13bb03645cb2633ab3739a3b97aa7",
-  "prompt_path": "prompts/qore-umi14-umi12-final-owner-recert-001-claude-c1.md"
+  "prompt_path": "prompts/qore-umi14-umi12-final-owner-recert-001-claude-c2.md"
 }
