@@ -29,6 +29,11 @@ jobs:
           set -euo pipefail
           CLEAN_TOKEN="$(printf '%s' "$CLAUDE_CODE_OAUTH_TOKEN_RAW" | tr -d '\r\n')"
           test -n "$CLEAN_TOKEN"
+          RAW_LEN="${#CLAUDE_CODE_OAUTH_TOKEN_RAW}"
+          CLEAN_LEN="${#CLEAN_TOKEN}"
+          RAW_LINES="$(printf '%s' "$CLAUDE_CODE_OAUTH_TOKEN_RAW" | awk 'END{print NR}')"
+          OTHER_WS="$(printf '%s' "$CLEAN_TOKEN" | grep -o '[[:space:]]' | wc -l || true)"
+          echo "OAuth token structural check: raw_len=${RAW_LEN}; clean_len=${CLEAN_LEN}; raw_lines=${RAW_LINES}; remaining_whitespace=${OTHER_WS}"
           export CLAUDE_CODE_OAUTH_TOKEN="$CLEAN_TOKEN"
           set +e
           claude -p 'Reply exactly QORE_CLAUDE_OAUTH_OK' \
@@ -41,16 +46,37 @@ jobs:
           set -e
           if [ "$STATUS" -ne 0 ]; then
             RAW="$CLAUDE_CODE_OAUTH_TOKEN_RAW" CLEAN="$CLEAN_TOKEN" \
-              python3 - "$RUNNER_TEMP/claude-oauth-smoke.err" <<'PY'
+              python3 - "$RUNNER_TEMP/claude-oauth-smoke.json" "$RUNNER_TEMP/claude-oauth-smoke.err" <<'PY'
+          import json
           import os
           import pathlib
           import sys
 
-          text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace")
-          for secret in (os.environ.get("RAW", ""), os.environ.get("CLEAN", "")):
-              if secret:
-                  text = text.replace(secret, "[REDACTED]")
-          print(text)
+          raw = os.environ.get("RAW", "")
+          clean = os.environ.get("CLEAN", "")
+          for path in sys.argv[1:]:
+              text = pathlib.Path(path).read_text(encoding="utf-8", errors="replace")
+              for secret in (raw, clean):
+                  if secret:
+                      text = text.replace(secret, "[REDACTED]")
+              if not text.strip():
+                  continue
+              try:
+                  payload = json.loads(text)
+              except json.JSONDecodeError:
+                  print(text)
+              else:
+                  safe = {
+                      "is_error": payload.get("is_error"),
+                      "result": payload.get("result"),
+                      "subtype": payload.get("subtype"),
+                      "stop_reason": payload.get("stop_reason"),
+                  }
+                  safe_text = json.dumps(safe, ensure_ascii=False)
+                  for secret in (raw, clean):
+                      if secret:
+                          safe_text = safe_text.replace(secret, "[REDACTED]")
+                  print(safe_text)
           PY
             exit "$STATUS"
           fi
