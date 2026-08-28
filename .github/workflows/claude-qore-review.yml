@@ -1,0 +1,171 @@
+name: Claude QORE review
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: qore-core pull request number
+        required: true
+        type: string
+      package_id:
+        description: Immutable Claude review package identifier
+        required: true
+        type: string
+      expected_base:
+        description: Expected frozen BASE SHA
+        required: true
+        type: string
+      expected_head:
+        description: Expected frozen HEAD SHA
+        required: true
+        type: string
+      expected_synthetic:
+        description: Expected frozen synthetic PR merge SHA
+        required: true
+        type: string
+      prompt_path:
+        description: Prompt file in reviewer repository
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    name: Claude read-only review
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout Claude reviewer infrastructure
+        uses: actions/checkout@v4
+
+      - name: Create QORE Claude Reviewer installation token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.QORE_CLAUDE_REVIEWER_APP_ID }}
+          private-key: ${{ secrets.QORE_CLAUDE_REVIEWER_PRIVATE_KEY }}
+          owner: mezas3238-hue
+          repositories: qore-core
+
+      - name: Verify live PR binding before checkout
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          EXPECTED_BASE: ${{ inputs.expected_base }}
+          EXPECTED_HEAD: ${{ inputs.expected_head }}
+          EXPECTED_SYNTHETIC: ${{ inputs.expected_synthetic }}
+        run: |
+          set -euo pipefail
+          PR_JSON="$(gh api "repos/mezas3238-hue/qore-core/pulls/${PR_NUMBER}")"
+          LIVE_STATE="$(printf '%s' "$PR_JSON" | jq -r '.state')"
+          LIVE_MERGED="$(printf '%s' "$PR_JSON" | jq -r '.merged')"
+          LIVE_BASE="$(printf '%s' "$PR_JSON" | jq -r '.base.sha')"
+          LIVE_HEAD="$(printf '%s' "$PR_JSON" | jq -r '.head.sha')"
+          LIVE_SYNTHETIC="$(printf '%s' "$PR_JSON" | jq -r '.merge_commit_sha')"
+          echo "PR state: ${LIVE_STATE}; merged=${LIVE_MERGED}"
+          echo "BASE: ${LIVE_BASE}"
+          echo "HEAD: ${LIVE_HEAD}"
+          echo "SYNTHETIC: ${LIVE_SYNTHETIC}"
+          test "$LIVE_STATE" = "open"
+          test "$LIVE_MERGED" = "false"
+          test "$LIVE_BASE" = "$EXPECTED_BASE"
+          test "$LIVE_HEAD" = "$EXPECTED_HEAD"
+          test "$LIVE_SYNTHETIC" = "$EXPECTED_SYNTHETIC"
+
+      - name: Checkout exact qore-core HEAD
+        uses: actions/checkout@v4
+        with:
+          repository: mezas3238-hue/qore-core
+          ref: ${{ inputs.expected_head }}
+          token: ${{ steps.app-token.outputs.token }}
+          path: workspace/qore-core
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact git binding and synthetic parents
+        working-directory: workspace/qore-core
+        env:
+          PR_NUMBER: ${{ inputs.pr_number }}
+          EXPECTED_BASE: ${{ inputs.expected_base }}
+          EXPECTED_HEAD: ${{ inputs.expected_head }}
+          EXPECTED_SYNTHETIC: ${{ inputs.expected_synthetic }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          git cat-file -e "${EXPECTED_BASE}^{commit}"
+          git fetch origin "refs/pull/${PR_NUMBER}/merge:refs/remotes/origin/qore-claude-review-merge"
+          LIVE_SYNTHETIC="$(git rev-parse refs/remotes/origin/qore-claude-review-merge)"
+          test "$LIVE_SYNTHETIC" = "$EXPECTED_SYNTHETIC"
+          PARENTS="$(git show -s --format=%P "$EXPECTED_SYNTHETIC")"
+          test "$PARENTS" = "$EXPECTED_BASE $EXPECTED_HEAD"
+          HEAD_TREE="$(git show -s --format=%T "$EXPECTED_HEAD")"
+          SYNTHETIC_TREE="$(git show -s --format=%T "$EXPECTED_SYNTHETIC")"
+          test "$HEAD_TREE" = "$SYNTHETIC_TREE"
+          echo "Frozen Claude binding verified."
+          git diff --stat "$EXPECTED_BASE" "$EXPECTED_HEAD"
+
+      - name: Run independent Claude reviewer
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          QORE_ROOT: ${{ github.workspace }}/workspace/qore-core
+          PR_NUMBER: ${{ inputs.pr_number }}
+          PACKAGE_ID: ${{ inputs.package_id }}
+          EXPECTED_BASE: ${{ inputs.expected_base }}
+          EXPECTED_HEAD: ${{ inputs.expected_head }}
+          EXPECTED_SYNTHETIC: ${{ inputs.expected_synthetic }}
+          PROMPT_PATH: ${{ github.workspace }}/${{ inputs.prompt_path }}
+          REVIEW_OUTPUT: ${{ github.workspace }}/claude-review.md
+          CLAUDE_MODEL: claude-opus-5
+          CLAUDE_MAX_TOKENS: "32000"
+          CLAUDE_MAX_ROUNDS: "8"
+        run: |
+          set -euo pipefail
+          python3 scripts/claude_reviewer.py
+
+      - name: Verify frozen HEAD again before publishing
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          EXPECTED_HEAD: ${{ inputs.expected_head }}
+        run: |
+          set -euo pipefail
+          LIVE_HEAD="$(gh api "repos/mezas3238-hue/qore-core/pulls/${PR_NUMBER}" --jq '.head.sha')"
+          echo "Pre-publication HEAD: ${LIVE_HEAD}"
+          test "$LIVE_HEAD" = "$EXPECTED_HEAD"
+
+      - name: Publish Claude review on exact HEAD
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          EXPECTED_HEAD: ${{ inputs.expected_head }}
+          PACKAGE_ID: ${{ inputs.package_id }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          review = Path("claude-review.md").read_text(encoding="utf-8")
+          body = (
+              f"<!-- QORE-CLAUDE-REVIEW package={os.environ['PACKAGE_ID']} "
+              f"head={os.environ['EXPECTED_HEAD']} -->\n\n" + review
+          )
+          payload = {
+              "body": body,
+              "event": "COMMENT",
+              "commit_id": os.environ["EXPECTED_HEAD"],
+          }
+          Path("review-payload.json").write_text(json.dumps(payload), encoding="utf-8")
+          PY
+          gh api --method POST \
+            "repos/mezas3238-hue/qore-core/pulls/${PR_NUMBER}/reviews" \
+            --input review-payload.json \
+            --jq '{id: .id, state: .state, user: .user.login, commit_id: .commit_id}'
+
+      - name: Review complete
+        if: ${{ always() }}
+        run: echo "Claude workflow completed."
