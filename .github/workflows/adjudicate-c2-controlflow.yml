@@ -1,4 +1,4 @@
-name: Adjudicate R62L abrupt control flow
+name: Adjudicate R62M implicit and repeated flow
 
 on:
   push:
@@ -14,53 +14,53 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: mezas3238-hue/qore-core
-          ref: 2ce54c0c332fcab23b068d3370aa85ee8bd75b8e
+          ref: 4379261608aea1baff52dffab281d840b6b845c4
           fetch-depth: 1
           persist-credentials: false
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12.14'
-      - name: Execute R62L abrupt-flow witnesses
+      - name: Execute R62M edge witnesses
         run: |
           set -euo pipefail
           python3 - <<'PY'
           import importlib, sys
           from pathlib import Path
           sys.path.insert(0, str(Path('tests/infrastructure').resolve()))
-          r62l = getattr(importlib.import_module('test_universal_cross_asset_conformance_final_owner_r62l_guards'), '_r62l_dynamic_execution_markers_from_source')
+          r62m = getattr(importlib.import_module('test_universal_cross_asset_conformance_final_owner_r62m_guards'), '_r62m_dynamic_execution_markers_from_source')
           cases = {
-            'partial_try_handler': '''def run():
+            'implicit_exception_after_walrus': '''import builtins
+          def run():
               return globals()["b"].eval("1+1")
           try:
-              import builtins as b
-              raise RuntimeError
-          except RuntimeError:
+              ((b := builtins), 1 / 0)
+          except ZeroDivisionError:
               result = run()
           b = len
           ''',
-            'break_skips_safe_rebind': '''def run():
+            'second_iteration_observation': '''def run():
+              return getattr(globals()["b"], "eval", lambda _: 3)("1+1")
+          b = len
+          for _ in (0, 1):
+              result = run()
+              import builtins as b
+          b = len
+          ''',
+            'continue_skips_safe_rebind': '''def run():
               return globals()["b"].eval("1+1")
           for _ in (0,):
               import builtins as b
-              break
+              continue
               b = len
           result = run()
           ''',
-            'compound_alias': '''def run():
-              return globals()["b"].eval("1+1")
-          if True:
-              alias = run
-              import builtins as b
-              result = alias()
-          b = len
-          ''',
-            'safe_handler': '''def run():
+            'safe_single_iteration': '''def run():
               return getattr(globals()["b"], "eval", lambda _: 3)("1+1")
-          try:
-              raise RuntimeError
-          except RuntimeError:
-              b = len
+          b = len
+          for _ in (0,):
               result = run()
+              b = len
+          result = run()
           ''',
           }
           def runtime(src):
@@ -68,5 +68,5 @@ jobs:
               exec(compile(src, '<probe>', 'exec', dont_inherit=True), ns)
               return ns.get('result')
           for name, src in cases.items():
-              print(f'{name}: runtime={runtime(src)!r} r62l={r62l(src)!r}')
+              print(f'{name}: runtime={runtime(src)!r} r62m={r62m(src)!r}')
           PY
