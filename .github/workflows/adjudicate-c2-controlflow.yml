@@ -1,4 +1,4 @@
-name: Adjudicate R62N edge precision
+name: Inspect R62N flow state
 
 on:
   push:
@@ -20,45 +20,26 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12.14'
-      - name: Execute R62N edge witnesses
+      - name: Inspect R62N abstract flow
         run: |
-          set -euo pipefail
           python3 - <<'PY'
           import importlib, sys
           from pathlib import Path
           sys.path.insert(0, str(Path('tests/infrastructure').resolve()))
-          r62n = getattr(importlib.import_module('test_universal_cross_asset_conformance_final_owner_r62n_guards'), '_r62n_dynamic_execution_markers_from_source')
+          n = importlib.import_module('test_universal_cross_asset_conformance_final_owner_r62n_guards')
+          k = importlib.import_module('test_universal_cross_asset_conformance_final_owner_r62k_guards')
+          j = importlib.import_module('test_universal_cross_asset_conformance_final_owner_r62j_guards')
           cases = {
-            'handler_type_mismatch': '''import builtins as b
+          'safe_explicit': '''import builtins as b
           def run():
               return getattr(globals()["b"], "eval", lambda _: 3)("1+1")
           try:
-              try:
-                  raise ValueError
-              except KeyError:
-                  result = run()
-          except ValueError:
               b = len
+              raise RuntimeError
+          except RuntimeError:
               result = run()
           ''',
-            'namedexpr_safe_before_raise': '''import builtins as b
-          def run():
-              return getattr(globals()["b"], "eval", lambda _: 3)("1+1")
-          try:
-              ((b := len), 1 / 0)
-          except ZeroDivisionError:
-              result = run()
-          ''',
-            'namedexpr_danger_before_raise': '''import builtins
-          def run():
-              return getattr(globals()["b"], "eval", lambda _: 3)("1+1")
-          b = len
-          try:
-              ((b := builtins), 1 / 0)
-          except ZeroDivisionError:
-              result = run()
-          ''',
-            'for_break_skips_else': '''import builtins as b
+          'for_break': '''import builtins as b
           def run():
               return getattr(globals()["b"], "eval", lambda _: 3)("1+1")
           for _ in (0,):
@@ -69,49 +50,16 @@ jobs:
               result = run()
           result = run()
           ''',
-            'for_continue_runs_else_safe': '''def run():
-              return getattr(globals()["b"], "eval", lambda _: 3)("1+1")
-          b = len
-          for _ in (0,):
-              import builtins as b
-              continue
-          else:
-              b = len
-              result = run()
-          ''',
-            'try_else_raise_not_caught': '''import builtins as b
-          def run():
-              return getattr(globals()["b"], "eval", lambda _: 3)("1+1")
-          try:
-              b = len
-          except RuntimeError:
-              import builtins as b
-              result = run()
-          else:
-              try:
-                  raise RuntimeError
-              except RuntimeError:
-                  result = run()
-          ''',
-            'with_break_unreachable_tail': '''from contextlib import nullcontext
-          def run():
-              return getattr(globals()["b"], "eval", lambda _: 3)("1+1")
-          for _ in (0,):
-              with nullcontext():
-                  import builtins as b
-                  break
-                  b = len
-          result = run()
-          ''',
           }
-          def runtime(src):
-              ns = {}
-              exec(compile(src, '<probe>', 'exec', dont_inherit=True), ns)
-              return ns.get('result')
           for name, src in cases.items():
-              try:
-                  value = runtime(src)
-              except Exception as exc:
-                  value = f'EXC:{type(exc).__name__}:{exc}'
-              print(f'{name}: runtime={value!r} r62n={r62n(src)!r}')
+              flow = n._r62n_flow(src)
+              print('CASE', name)
+              print('precision', flow[2])
+              print('owner_by_call', k._r62k_top_level_owner_calls(src))
+              print('escaped', k._r62k_escaped_owners(src))
+              print('observations', flow[0])
+              print('timeline', flow[1])
+              print('fallback', n._r62n_future_authority_by_call(src, flow[1]))
+              print('observable', n._r62n_observable_authority_by_call(src))
+              print('markers', n._r62n_dynamic_execution_markers_from_source(src))
           PY
