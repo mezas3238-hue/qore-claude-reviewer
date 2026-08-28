@@ -1,0 +1,194 @@
+name: QORE Claude Review
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "QORE Core PR number"
+        required: true
+        type: string
+      base_sha:
+        description: "Frozen BASE SHA"
+        required: true
+        type: string
+      head_sha:
+        description: "Frozen HEAD SHA"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    name: Claude read-only review
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Create QORE Core GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.QORE_CLAUDE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.QORE_CLAUDE_APP_PRIVATE_KEY }}
+          owner: mezas3238-hue
+          repositories: qore-core
+          permission-contents: read
+          permission-pull-requests: read
+
+      - name: Verify frozen PR binding
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          EXPECTED_BASE: ${{ inputs.base_sha }}
+          EXPECTED_HEAD: ${{ inputs.head_sha }}
+        run: |
+          set -euo pipefail
+
+          ACTUAL_BASE="$(gh api \
+            "repos/mezas3238-hue/qore-core/pulls/${PR_NUMBER}" \
+            --jq '.base.sha')"
+
+          ACTUAL_HEAD="$(gh api \
+            "repos/mezas3238-hue/qore-core/pulls/${PR_NUMBER}" \
+            --jq '.head.sha')"
+
+          echo "Expected BASE: ${EXPECTED_BASE}"
+          echo "Actual BASE:   ${ACTUAL_BASE}"
+          echo "Expected HEAD: ${EXPECTED_HEAD}"
+          echo "Actual HEAD:   ${ACTUAL_HEAD}"
+
+          test "${ACTUAL_BASE}" = "${EXPECTED_BASE}" || {
+            echo "::error::BASE SHA mismatch. Review blocked."
+            exit 1
+          }
+
+          test "${ACTUAL_HEAD}" = "${EXPECTED_HEAD}" || {
+            echo "::error::HEAD SHA mismatch. Review blocked."
+            exit 1
+          }
+
+      - name: Checkout exact QORE Core HEAD
+        uses: actions/checkout@v6
+        with:
+          repository: mezas3238-hue/qore-core
+          ref: ${{ inputs.head_sha }}
+          token: ${{ steps.app-token.outputs.token }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify checkout
+        shell: bash
+        env:
+          EXPECTED_BASE: ${{ inputs.base_sha }}
+          EXPECTED_HEAD: ${{ inputs.head_sha }}
+        run: |
+          set -euo pipefail
+
+          ACTUAL_HEAD="$(git rev-parse HEAD)"
+          echo "Checked-out HEAD: ${ACTUAL_HEAD}"
+
+          test "${ACTUAL_HEAD}" = "${EXPECTED_HEAD}" || {
+            echo "::error::Checked-out HEAD mismatch. Review blocked."
+            exit 1
+          }
+
+          git cat-file -e "${EXPECTED_BASE}^{commit}" || {
+            echo "::error::Frozen BASE commit unavailable. Review blocked."
+            exit 1
+          }
+
+          git diff --stat "${EXPECTED_BASE}..${EXPECTED_HEAD}"
+
+      - name: Run Claude review
+        id: claude
+        uses: anthropics/claude-code-action/base-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            You are the independent Claude reviewer for QORE Core.
+
+            TARGET REPOSITORY:
+            mezas3238-hue/qore-core
+
+            PR:
+            #${{ inputs.pr_number }}
+
+            FROZEN BASE:
+            ${{ inputs.base_sha }}
+
+            FROZEN HEAD:
+            ${{ inputs.head_sha }}
+
+            Review the complete BASE..HEAD delta.
+
+            This is a READ-ONLY technical review.
+
+            Mandatory rules:
+            - Do not edit files.
+            - Do not create commits.
+            - Do not push.
+            - Do not merge.
+            - Do not change GitHub state.
+            - Do not expose credentials or secrets.
+            - Do not infer a PASS if evidence is incomplete.
+            - Inspect the complete BASE..HEAD delta, not only the latest commit.
+            - Report only reproducible, technically material findings.
+            - For each finding identify the affected location, concrete failure mode,
+              violated invariant or contract, impact, and minimal corrective direction.
+            - If evidence is insufficient, return BLOCKED rather than PASS.
+
+            Verdict semantics:
+            PASS = no material finding after sufficient review.
+            FINDINGS = one or more material reproducible defects.
+            BLOCKED = evidence insufficient or review cannot be completed reliably.
+
+          claude_args: |
+            --max-turns 15
+            --allowedTools "Read,Grep,Glob,Bash(git diff:*),Bash(git show:*),Bash(git log:*),Bash(git rev-parse:*),Bash(git status:*)"
+            --disallowedTools "Edit,Write,NotebookEdit,WebFetch,WebSearch"
+            --json-schema '{"type":"object","properties":{"verdict":{"type":"string","enum":["PASS","FINDINGS","BLOCKED"]},"summary":{"type":"string"},"findings":{"type":"array","items":{"type":"string"}}},"required":["verdict","summary","findings"],"additionalProperties":false}'
+
+      - name: Validate Claude result
+        shell: bash
+        env:
+          RESULT: ${{ steps.claude.outputs.structured_output }}
+        run: |
+          set -euo pipefail
+
+          test -n "${RESULT}" || {
+            echo "::error::Claude returned no structured review result."
+            exit 1
+          }
+
+          echo "${RESULT}" | jq -e '
+            (.verdict == "PASS" or
+             .verdict == "FINDINGS" or
+             .verdict == "BLOCKED")
+            and (.summary | type == "string")
+            and (.findings | type == "array")
+          ' >/dev/null || {
+            echo "::error::Malformed Claude review result."
+            exit 1
+          }
+
+          {
+            echo "## QORE Claude Review"
+            echo
+            echo "**Verdict:** $(echo "${RESULT}" | jq -r '.verdict')"
+            echo
+            echo "### Summary"
+            echo
+            echo "${RESULT}" | jq -r '.summary'
+            echo
+            echo "### Findings"
+            echo
+            echo "${RESULT}" | jq -r '
+              if (.findings | length) == 0
+              then "None."
+              else .findings[] | "- " + .
+              end
+            '
+          } >> "${GITHUB_STEP_SUMMARY}"
