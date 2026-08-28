@@ -16,11 +16,54 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - name: Verify Anthropic API key and Claude Opus 5 availability
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          key = os.environ.get("ANTHROPIC_API_KEY", "")
+          if not key:
+              raise SystemExit("ANTHROPIC_API_KEY is empty")
+          req = urllib.request.Request(
+              "https://api.anthropic.com/v1/models?limit=100",
+              headers={
+                  "x-api-key": key,
+                  "anthropic-version": "2023-06-01",
+              },
+          )
+          with urllib.request.urlopen(req, timeout=60) as response:
+              payload = json.loads(response.read().decode("utf-8"))
+          ids = {row.get("id") for row in payload.get("data", [])}
+          print("Anthropic authentication OK.")
+          if "claude-opus-5" not in ids:
+              print("Available Claude model IDs:")
+              for model_id in sorted(x for x in ids if isinstance(x, str) and x.startswith("claude-")):
+                  print(model_id)
+              raise SystemExit("claude-opus-5 is not available to this API key")
+          print("claude-opus-5 available.")
+          PY
+
+      - name: Validate configured GitHub App private key locally
+        env:
+          APP_PRIVATE_KEY: ${{ secrets.QORE_CLAUDE_APP_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$APP_PRIVATE_KEY" || { echo "QORE_CLAUDE_APP_PRIVATE_KEY is empty" >&2; exit 1; }
+          printf '%s' "$APP_PRIVATE_KEY" > "$RUNNER_TEMP/qore-claude-app.pem"
+          openssl pkey -in "$RUNNER_TEMP/qore-claude-app.pem" -check -noout >/dev/null
+          echo "GitHub App PEM parses and passes local key consistency check."
+          rm -f "$RUNNER_TEMP/qore-claude-app.pem"
+
       - name: Create QORE Claude Reviewer installation token
         id: app-token
         uses: actions/create-github-app-token@v3
         with:
-          app-id: 4749196
+          client-id: ${{ vars.QORE_CLAUDE_APP_CLIENT_ID }}
           private-key: ${{ secrets.QORE_CLAUDE_APP_PRIVATE_KEY }}
           owner: mezas3238-hue
           repositories: qore-core
@@ -34,31 +77,3 @@ jobs:
           set -euo pipefail
           gh api repos/mezas3238-hue/qore-core/pulls/461 \
             --jq '{number,state,merged,base:.base.sha,head:.head.sha}'
-
-      - name: Verify Anthropic API key and Claude Opus 5 availability
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import json
-          import os
-          import urllib.request
-
-          req = urllib.request.Request(
-              "https://api.anthropic.com/v1/models?limit=100",
-              headers={
-                  "x-api-key": os.environ["ANTHROPIC_API_KEY"],
-                  "anthropic-version": "2023-06-01",
-              },
-          )
-          with urllib.request.urlopen(req, timeout=60) as response:
-              payload = json.loads(response.read().decode("utf-8"))
-          ids = {row.get("id") for row in payload.get("data", [])}
-          if "claude-opus-5" not in ids:
-              print("Available Claude model IDs:")
-              for model_id in sorted(x for x in ids if isinstance(x, str) and x.startswith("claude-")):
-                  print(model_id)
-              raise SystemExit("claude-opus-5 is not available to this API key")
-          print("Anthropic authentication OK; claude-opus-5 available.")
-          PY
