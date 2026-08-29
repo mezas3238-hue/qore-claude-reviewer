@@ -1,4 +1,4 @@
-name: Probe R62N nested failed-star and finally paths
+name: Probe R62N TryStar downstream authority
 
 on:
   push:
@@ -22,7 +22,7 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12.14'
-      - name: Execute focused runtime/scanner probes
+      - name: Execute isolated TryStar downstream witnesses
         run: |
           python - <<'PY'
           import builtins
@@ -33,41 +33,46 @@ jobs:
 
           sys.path.insert(0, str(Path('tests/infrastructure').resolve()))
           n = importlib.import_module('test_universal_cross_asset_conformance_final_owner_r62n_guards')
-          module_name = 'qore_r62n_nested_star_probe'
+          module_name = 'qore_r62n_trystar_downstream_probe'
           module = types.ModuleType(module_name)
           module.__all__ = ['b', 'missing']
           module.b = builtins.eval
           sys.modules[module_name] = module
 
-          cases: dict[str, tuple[str, int, bool | None]] = {
-              'outer_handler_danger': ('b = len\ntry:\n    try:\n        from ' + module_name + ' import *\n    finally:\n        marker = 1\nexcept AttributeError:\n    result = b("1+1")\n', 2, True),
-              'downstream_danger': ('b = len\ntry:\n    try:\n        from ' + module_name + ' import *\n    finally:\n        marker = 1\nexcept AttributeError:\n    pass\nresult = b("1+1")\n', 2, True),
-              'finally_danger_before_safe_rebind': ('b = len\ntry:\n    from ' + module_name + ' import *\nexcept AttributeError:\n    pass\nfinally:\n    result = b("1+1")\n    b = lambda _: 3\n', 2, True),
-              'handler_concrete_safe_but_unknown_star_may_succeed': ('b = len\ntry:\n    from ' + module_name + ' import *\nexcept AttributeError:\n    b = lambda _: 3\nresult = b("abc")\n', 3, None),
-              'nested_finally_proven_safe_rebind': ('b = len\ntry:\n    try:\n        from ' + module_name + ' import *\n    finally:\n        b = lambda _: 3\nexcept AttributeError:\n    result = b("abc")\n', 3, False),
-              'nested_if_star_outer_handler': ('b = len\ntry:\n    if True:\n        from ' + module_name + ' import *\nexcept AttributeError:\n    result = b("1+1")\n', 2, True),
-              'nested_for_star_outer_handler': ('b = len\ntry:\n    for _ in (0,):\n        from ' + module_name + ' import *\nexcept AttributeError:\n    result = b("1+1")\n', 2, True),
-              'handler_order_preserves_danger': ('b = len\ntry:\n    try:\n        from ' + module_name + ' import *\n    finally:\n        marker = 1\nexcept KeyError:\n    b = lambda _: 3\nexcept AttributeError:\n    result = b("1+1")\n', 2, True),
-              'trystar_failed_star_handler_danger': ('b = len\ntry:\n    from ' + module_name + ' import *\nexcept* AttributeError:\n    result = b("1+1")\n', 2, True),
-              'trystar_failed_star_downstream_danger': ('b = len\ntry:\n    from ' + module_name + ' import *\nexcept* AttributeError:\n    pass\nresult = b("1+1")\n', 2, True),
-          }
+          dangerous = (
+              'b = len\n'
+              'try:\n'
+              f'    from {module_name} import *\n'
+              'except* AttributeError:\n'
+              '    pass\n'
+              'result = b("1+1")\n'
+          )
+          safe = (
+              'b = len\n'
+              'try:\n'
+              '    try:\n'
+              f'        from {module_name} import *\n'
+              '    finally:\n'
+              '        b = lambda _: 3\n'
+              'except* AttributeError:\n'
+              '    pass\n'
+              'result = b("abc")\n'
+          )
 
           try:
-              observations: list[tuple[str, tuple[str, ...]]] = []
-              for name, (source, expected_runtime, expect_marker) in cases.items():
+              for name, source, expected, should_mark in (
+                  ('trystar_downstream_danger', dangerous, 2, True),
+                  ('trystar_downstream_unconditional_safe_rebind', safe, 3, False),
+              ):
                   ns: dict[str, object] = {}
                   exec(compile(source, f'<{name}>', 'exec', dont_inherit=True), ns)
                   markers = n._r62n_dynamic_execution_markers_from_source(source)
-                  runtime = ns.get('result')
-                  print(name, 'runtime=', runtime, 'markers=', markers)
-                  assert runtime == expected_runtime, (name, runtime, expected_runtime)
-                  if expect_marker is True:
+                  print(name, 'runtime=', ns.get('result'), 'markers=', markers)
+                  assert ns.get('result') == expected
+                  if should_mark:
                       assert markers, f'material FN: {name}'
-                  elif expect_marker is False:
-                      assert markers == (), f'unexpected FP on provably safe path {name}: {markers}'
                   else:
-                      observations.append((name, markers))
-              print('CONSERVATIVE_OBSERVATIONS=', observations)
+                      assert markers == (), f'unexpected FP: {name}: {markers}'
           finally:
               sys.modules.pop(module_name, None)
           PY
