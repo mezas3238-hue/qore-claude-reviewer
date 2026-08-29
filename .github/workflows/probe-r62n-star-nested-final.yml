@@ -76,12 +76,38 @@ jobs:
                       '    pass\n'
                       'result = b("abc")\n'
                   ),
+                  'partial_group_first_handler_danger': (
+                      'b = len\n'
+                      'try:\n'
+                      '    try:\n'
+                      f'        from {module_name} import *\n'
+                      '    finally:\n'
+                      '        raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])\n'
+                      'except* AttributeError:\n'
+                      '    result = b("1+1")\n'
+                      'except* ValueError:\n'
+                      '    pass\n'
+                  ),
+                  'partial_group_second_handler_danger': (
+                      'b = len\n'
+                      'try:\n'
+                      '    try:\n'
+                      f'        from {module_name} import *\n'
+                      '    finally:\n'
+                      '        raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])\n'
+                      'except* AttributeError:\n'
+                      '    pass\n'
+                      'except* ValueError:\n'
+                      '    result = b("1+1")\n'
+                  ),
               }
               expected_runtime = {
                   'handler_danger': 2,
                   'downstream_danger': 2,
                   'handler_safe': 3,
                   'downstream_safe': 3,
+                  'partial_group_first_handler_danger': 2,
+                  'partial_group_second_handler_danger': 2,
               }
               for name, source in specimens.items():
                   runtime = n._runtime_result(source)
@@ -89,9 +115,14 @@ jobs:
                   print(f'{name}: runtime={runtime} markers={markers}')
                   assert runtime == expected_runtime[name]
                   if name.endswith('_danger'):
-                      assert markers, f'material false negative: {name}'
-              # Safe cases are reported, not weakened into danger expectations.
-              # Their marker shape determines whether a precision repair is justified.
+                      call_line = next(
+                          index for index, line in enumerate(source.splitlines(), 1)
+                          if 'result = b(' in line
+                      )
+                      assert f'call:{call_line}' in markers, (
+                          f'material false negative: {name}; expected call:{call_line}, got {markers}'
+                      )
+              # Safe cases are observations; their marker shape is precision evidence.
           finally:
               sys.modules.pop(module_name, None)
           PY
