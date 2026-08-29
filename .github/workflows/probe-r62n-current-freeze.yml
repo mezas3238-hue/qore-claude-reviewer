@@ -40,13 +40,7 @@ jobs:
               module.__all__ = order
               module.b = builtins.eval
               sys.modules['qore_r62n_star_probe'] = module
-              source = '''b = len
-try:
-    from qore_r62n_star_probe import *
-except AttributeError:
-    pass
-result = b("1+1")
-'''
+              source = "b = len\ntry:\n    from qore_r62n_star_probe import *\nexcept AttributeError:\n    pass\nresult = b(\"1+1\")\n"
               namespace: dict[str, object] = {}
               exec(compile(source, '<failed-star>', 'exec', dont_inherit=True), namespace)
               markers = n._r62n_dynamic_execution_markers_from_source(source)
