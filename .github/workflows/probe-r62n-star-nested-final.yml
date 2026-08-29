@@ -1,4 +1,4 @@
-name: Probe R62N TryStar downstream authority
+name: Diagnose R62N TryStar successor flow
 
 on:
   push:
@@ -22,32 +22,18 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12.14'
-      - name: Execute isolated TryStar downstream witnesses
+      - name: Inspect TryStar abstract successor states
         run: |
           python - <<'PY'
-          import builtins
+          import ast
           import importlib
           import sys
-          import types
           from pathlib import Path
 
           sys.path.insert(0, str(Path('tests/infrastructure').resolve()))
           n = importlib.import_module('test_universal_cross_asset_conformance_final_owner_r62n_guards')
           module_name = 'qore_r62n_trystar_downstream_probe'
-          module = types.ModuleType(module_name)
-          module.__all__ = ['b', 'missing']
-          module.b = builtins.eval
-          sys.modules[module_name] = module
-
-          dangerous = (
-              'b = len\n'
-              'try:\n'
-              f'    from {module_name} import *\n'
-              'except* AttributeError:\n'
-              '    pass\n'
-              'result = b("1+1")\n'
-          )
-          safe = (
+          source = (
               'b = len\n'
               'try:\n'
               '    try:\n'
@@ -58,21 +44,43 @@ jobs:
               '    pass\n'
               'result = b("abc")\n'
           )
-
-          try:
-              for name, source, expected, should_mark in (
-                  ('trystar_downstream_danger', dangerous, 2, True),
-                  ('trystar_downstream_unconditional_safe_rebind', safe, 3, False),
-              ):
-                  ns: dict[str, object] = {}
-                  exec(compile(source, f'<{name}>', 'exec', dont_inherit=True), ns)
-                  markers = n._r62n_dynamic_execution_markers_from_source(source)
-                  print(name, 'runtime=', ns.get('result'), 'markers=', markers)
-                  assert ns.get('result') == expected
-                  if should_mark:
-                      assert markers, f'material FN: {name}'
-                  else:
-                      assert markers == (), f'unexpected FP: {name}: {markers}'
-          finally:
-              sys.modules.pop(module_name, None)
+          tree = ast.parse(source)
+          try_node = tree.body[1]
+          assert isinstance(try_node, ast.TryStar)
+          initial = (
+              {
+                  '__builtins__': n._r12._BUILTINS_NAMESPACE,
+                  'b': n._UNKNOWN,
+              },
+              {},
+          )
+          timeline = {}
+          observations = {}
+          precision_lost = [False]
+          outcomes = n._r62n_process_try(
+              try_node,
+              initial,
+              top_index=0,
+              timeline=timeline,
+              observations=observations,
+              precision_lost=precision_lost,
+          )
+          print('precision_lost=', precision_lost[0])
+          for index, outcome in enumerate(outcomes):
+              env = outcome.state[0]
+              print(
+                  'OUTCOME', index,
+                  'kind=', outcome.kind,
+                  'b=', env.get('b'),
+                  'star=', env.get(n._R62N_STAR_IMPORT_TAINT),
+                  'exception=', env.get(n._R62N_EXCEPTION_TAG),
+              )
+          obs, full_timeline, full_precision = n._r62n_flow(source)
+          print('FLOW precision=', full_precision)
+          for index, states in sorted(full_timeline.items()):
+              print('TIMELINE', index, [
+                  (state.get('b'), state.get(n._R62N_STAR_IMPORT_TAINT))
+                  for state in states
+              ])
+          print('markers=', n._r62n_dynamic_execution_markers_from_source(source))
           PY
