@@ -1,0 +1,41 @@
+name: Probe UMI14 final owner audit
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/probe-umi14-final-owner-audit.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout exact Core candidate
+        uses: actions/checkout@v4
+        with:
+          repository: mezas3238-hue/qore-core
+          ref: a29c622ca692a2f01efe2c6c1e4b1df4e9c59484
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12.14'
+      - name: Install test tooling
+        run: python -m pip install -e '.[dev]'
+      - name: Verify immutable audit boundaries
+        run: |
+          test "$(git hash-object tests/infrastructure/test_universal_cross_asset_conformance_full_closure.py)" = "249caa1504e2b62277a9389dc7e73bcabf12e7db"
+          if git diff --name-only ebd0adf000874797653df92ea1c08a892cce6c8c..HEAD | grep -q '^src/qore/'; then
+            echo 'ERROR: src/qore delta detected in final-owner recertification'
+            exit 1
+          fi
+          echo 'BOUNDARIES_OK oracle=249caa... src/qore_delta=0'
+      - name: Execute UMI final-owner and historical closure contracts
+        run: |
+          pytest -q \
+            tests/infrastructure/test_universal_cross_asset_conformance_final_owner_guards.py \
+            tests/infrastructure/test_universal_cross_asset_conformance_full_closure.py
+          echo 'UMI_AUDIT_OK final-owner + historical-full-closure'
