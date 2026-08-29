@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import base64
+import re
 import subprocess
 import sys
 import textwrap
+import zlib
 from pathlib import Path
 
 REVIEWER = Path.cwd()
@@ -81,3 +84,24 @@ finally:
 ''', 2, 9, True)
 """
 _run("fresh-static-sequencing-inversions", fresh)
+
+canonical_workflow = (REVIEWER / ".github/workflows/adjudicate-c2-controlflow.yml").read_text(encoding="utf-8")
+match = re.search(r"PROBE_ZLIB_B64: '([^']+)'", canonical_workflow)
+assert match is not None
+canonical_script = zlib.decompress(base64.b64decode(match.group(1))).decode("utf-8")
+print("=== canonical-adversarial-matrix-raw ===", flush=True)
+canonical = subprocess.run(
+    [sys.executable, "-c", canonical_script],
+    cwd=CORE,
+    text=True,
+    capture_output=True,
+    check=False,
+)
+print("CANONICAL_RETURN_CODE=", canonical.returncode)
+print("CANONICAL_STDOUT_BEGIN")
+print(canonical.stdout)
+print("CANONICAL_STDOUT_END")
+print("CANONICAL_STDERR_BEGIN")
+print(canonical.stderr)
+print("CANONICAL_STDERR_END")
+assert canonical.returncode in {0, 1}
