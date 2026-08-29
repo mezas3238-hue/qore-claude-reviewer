@@ -22,7 +22,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: mezas3238-hue/qore-core
-          ref: 35d48570b93473da7bfd4ae0a50073bc253cba76
+          ref: 903c0e2e221f51df705873f90ff9ec18d58101fe
           path: core
           fetch-depth: 1
           persist-credentials: false
