@@ -1,0 +1,94 @@
+name: Probe R62N nested failed-star and finally paths
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/probe-r62n-star-nested-final.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: mezas3238-hue/qore-core
+          ref: e87778368efc8887b50c1be94bae7381842ac3a6
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12.14'
+      - name: Execute focused runtime/scanner probes
+        run: |
+          python - <<'PY'
+          import builtins
+          import importlib
+          import sys
+          import types
+          from pathlib import Path
+
+          sys.path.insert(0, str(Path('tests/infrastructure').resolve()))
+          n = importlib.import_module('test_universal_cross_asset_conformance_final_owner_r62n_guards')
+
+          module_name = 'qore_r62n_nested_star_probe'
+          module = types.ModuleType(module_name)
+          module.__all__ = ['b', 'missing']
+          module.b = builtins.eval
+          sys.modules[module_name] = module
+
+          cases = {
+              'outer_handler_danger': f'''\
+b = len
+try:
+    try:
+        from {module_name} import *
+    finally:
+        marker = 1
+except AttributeError:
+    result = b("1+1")
+''',
+              'finally_danger_before_safe_rebind': f'''\
+b = len
+try:
+    from {module_name} import *
+except AttributeError:
+    pass
+finally:
+    result = b("1+1")
+    b = len
+''',
+              'handler_rebind_safe': f'''\
+b = len
+try:
+    from {module_name} import *
+except AttributeError:
+    b = len
+result = b("abc")
+''',
+              'finally_rebind_safe': f'''\
+b = len
+try:
+    from {module_name} import *
+except AttributeError:
+    pass
+finally:
+    b = len
+result = b("abc")
+''',
+          }
+          dangerous = {'outer_handler_danger', 'finally_danger_before_safe_rebind'}
+          for name, source in cases.items():
+              ns: dict[str, object] = {}
+              exec(compile(source, f'<{name}>', 'exec', dont_inherit=True), ns)
+              markers = n._r62n_dynamic_execution_markers_from_source(source)
+              print(name, 'runtime=', ns.get('result'), 'markers=', markers)
+              if name in dangerous:
+                  assert ns.get('result') == 2
+                  assert markers, f'material FN: {name}'
+              else:
+                  assert ns.get('result') == 3
+          PY
