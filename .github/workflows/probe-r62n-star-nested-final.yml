@@ -39,37 +39,17 @@ jobs:
           module.b = builtins.eval
           sys.modules[module_name] = module
 
-          # marker expectation: True=mandatory danger, False=provably safe,
-          # None=concrete-runtime safe but statically conservative because unknown
-          # external star import could succeed and bypass the handler rebind.
           cases: dict[str, tuple[str, int, bool | None]] = {
-              'outer_handler_danger': (
-                  'b = len\ntry:\n    try:\n        from ' + module_name + ' import *\n    finally:\n        marker = 1\nexcept AttributeError:\n    result = b("1+1")\n', 2, True,
-              ),
-              'downstream_danger': (
-                  'b = len\ntry:\n    try:\n        from ' + module_name + ' import *\n    finally:\n        marker = 1\nexcept AttributeError:\n    pass\nresult = b("1+1")\n', 2, True,
-              ),
-              'finally_danger_before_safe_rebind': (
-                  'b = len\ntry:\n    from ' + module_name + ' import *\nexcept AttributeError:\n    pass\nfinally:\n    result = b("1+1")\n    b = lambda _: 3\n', 2, True,
-              ),
-              'handler_concrete_safe_but_unknown_star_may_succeed': (
-                  'b = len\ntry:\n    from ' + module_name + ' import *\nexcept AttributeError:\n    b = lambda _: 3\nresult = b("abc")\n', 3, None,
-              ),
-              'nested_finally_proven_safe_rebind': (
-                  'b = len\ntry:\n    try:\n        from ' + module_name + ' import *\n    finally:\n        b = lambda _: 3\nexcept AttributeError:\n    result = b("abc")\n', 3, False,
-              ),
-              'nested_if_star_outer_handler': (
-                  'b = len\ntry:\n    if True:\n        from ' + module_name + ' import *\nexcept AttributeError:\n    result = b("1+1")\n', 2, True,
-              ),
-              'nested_for_star_outer_handler': (
-                  'b = len\ntry:\n    for _ in (0,):\n        from ' + module_name + ' import *\nexcept AttributeError:\n    result = b("1+1")\n', 2, True,
-              ),
-              'handler_order_preserves_danger': (
-                  'b = len\ntry:\n    try:\n        from ' + module_name + ' import *\n    finally:\n        marker = 1\nexcept KeyError:\n    b = lambda _: 3\nexcept AttributeError:\n    result = b("1+1")\n', 2, True,
-              ),
-              'trystar_failed_star_handler_danger': (
-                  'b = len\ntry:\n    from ' + module_name + ' import *\nexcept* AttributeError:\n    result = b("1+1")\n', 2, True,
-              ),
+              'outer_handler_danger': ('b = len\ntry:\n    try:\n        from ' + module_name + ' import *\n    finally:\n        marker = 1\nexcept AttributeError:\n    result = b("1+1")\n', 2, True),
+              'downstream_danger': ('b = len\ntry:\n    try:\n        from ' + module_name + ' import *\n    finally:\n        marker = 1\nexcept AttributeError:\n    pass\nresult = b("1+1")\n', 2, True),
+              'finally_danger_before_safe_rebind': ('b = len\ntry:\n    from ' + module_name + ' import *\nexcept AttributeError:\n    pass\nfinally:\n    result = b("1+1")\n    b = lambda _: 3\n', 2, True),
+              'handler_concrete_safe_but_unknown_star_may_succeed': ('b = len\ntry:\n    from ' + module_name + ' import *\nexcept AttributeError:\n    b = lambda _: 3\nresult = b("abc")\n', 3, None),
+              'nested_finally_proven_safe_rebind': ('b = len\ntry:\n    try:\n        from ' + module_name + ' import *\n    finally:\n        b = lambda _: 3\nexcept AttributeError:\n    result = b("abc")\n', 3, False),
+              'nested_if_star_outer_handler': ('b = len\ntry:\n    if True:\n        from ' + module_name + ' import *\nexcept AttributeError:\n    result = b("1+1")\n', 2, True),
+              'nested_for_star_outer_handler': ('b = len\ntry:\n    for _ in (0,):\n        from ' + module_name + ' import *\nexcept AttributeError:\n    result = b("1+1")\n', 2, True),
+              'handler_order_preserves_danger': ('b = len\ntry:\n    try:\n        from ' + module_name + ' import *\n    finally:\n        marker = 1\nexcept KeyError:\n    b = lambda _: 3\nexcept AttributeError:\n    result = b("1+1")\n', 2, True),
+              'trystar_failed_star_handler_danger': ('b = len\ntry:\n    from ' + module_name + ' import *\nexcept* AttributeError:\n    result = b("1+1")\n', 2, True),
+              'trystar_failed_star_downstream_danger': ('b = len\ntry:\n    from ' + module_name + ' import *\nexcept* AttributeError:\n    pass\nresult = b("1+1")\n', 2, True),
           }
 
           try:
