@@ -33,14 +33,17 @@ jobs:
           sys.path.insert(0, str(Path('tests/infrastructure').resolve()))
           n = importlib.import_module('test_universal_cross_asset_conformance_final_owner_r62n_guards')
 
-          def execute(name: str, source: str, expected: int, *, dangerous: bool) -> None:
+          def source(*lines: str) -> str:
+              return "\n".join(lines) + "\n"
+
+          def execute(name: str, text: str, expected: int, *, dangerous: bool) -> None:
               namespace: dict[str, object] = {}
               caught: BaseException | None = None
               try:
-                  exec(compile(source, f'<{name}>', 'exec', dont_inherit=True), namespace)
-              except BaseException as exc:  # probe intentionally exercises propagation
+                  exec(compile(text, f'<{name}>', 'exec', dont_inherit=True), namespace)
+              except BaseException as exc:
                   caught = exc
-              markers = n._r62n_dynamic_execution_markers_from_source(source)
+              markers = n._r62n_dynamic_execution_markers_from_source(text)
               runtime = namespace.get('result')
               print(name, 'runtime=', runtime, 'caught=', type(caught).__name__ if caught else None, 'markers=', markers)
               assert runtime == expected, (name, runtime, expected)
@@ -52,162 +55,154 @@ jobs:
 
           execute(
               'new_handler_exception_not_caught_by_sibling',
-              '''\
-b = len
-try:
-    try:
-        raise ExceptionGroup("eg", [AttributeError("a")])
-    except* AttributeError:
-        b = eval
-        raise ValueError("new")
-    except* ValueError:
-        b = len
-except ValueError:
-    result = b("1+1")
-''',
+              source(
+                  'b = len',
+                  'try:',
+                  '    try:',
+                  '        raise ExceptionGroup("eg", [AttributeError("a")])',
+                  '    except* AttributeError:',
+                  '        b = eval',
+                  '        raise ValueError("new")',
+                  '    except* ValueError:',
+                  '        b = len',
+                  'except ValueError:',
+                  '    result = b("1+1")',
+              ),
               2,
               dangerous=True,
           )
-
           execute(
               'later_original_subgroup_runs_before_propagating_new_exception',
-              '''\
-b = eval
-try:
-    try:
-        raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])
-    except* AttributeError:
-        b = eval
-        raise TypeError("new")
-    except* ValueError:
-        b = len
-    finally:
-        result = b("abc")
-except TypeError:
-    pass
-''',
+              source(
+                  'b = eval',
+                  'try:',
+                  '    try:',
+                  '        raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])',
+                  '    except* AttributeError:',
+                  '        b = eval',
+                  '        raise TypeError("new")',
+                  '    except* ValueError:',
+                  '        b = len',
+                  '    finally:',
+                  '        result = b("abc")',
+                  'except TypeError:',
+                  '    pass',
+              ),
               3,
               dangerous=False,
           )
-
           execute(
               'fully_consumed_tuple_prevents_later_overlap',
-              '''\
-b = eval
-try:
-    raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])
-except* (AttributeError, ValueError):
-    b = len
-except* ValueError:
-    b = eval
-result = b("abc")
-''',
+              source(
+                  'b = eval',
+                  'try:',
+                  '    raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])',
+                  'except* (AttributeError, ValueError):',
+                  '    b = len',
+                  'except* ValueError:',
+                  '    b = eval',
+                  'result = b("abc")',
+              ),
               3,
               dangerous=False,
           )
-
           execute(
               'nonmatching_later_handler_does_not_mutate_successor',
-              '''\
-b = eval
-try:
-    raise ExceptionGroup("eg", [AttributeError("a")])
-except* AttributeError:
-    b = len
-except* ValueError:
-    b = eval
-result = b("abc")
-''',
+              source(
+                  'b = eval',
+                  'try:',
+                  '    raise ExceptionGroup("eg", [AttributeError("a")])',
+                  'except* AttributeError:',
+                  '    b = len',
+                  'except* ValueError:',
+                  '    b = eval',
+                  'result = b("abc")',
+              ),
               3,
               dangerous=False,
           )
-
           execute(
               'unmatched_remainder_reaches_outer_after_prior_side_effect',
-              '''\
-b = len
-try:
-    try:
-        raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])
-    except* AttributeError:
-        b = eval
-except ExceptionGroup:
-    result = b("1+1")
-''',
+              source(
+                  'b = len',
+                  'try:',
+                  '    try:',
+                  '        raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])',
+                  '    except* AttributeError:',
+                  '        b = eval',
+                  'except ExceptionGroup:',
+                  '    result = b("1+1")',
+              ),
               2,
               dangerous=True,
           )
-
           execute(
               'bare_reraise_plus_later_subgroup_preserves_later_safe_state',
-              '''\
-b = eval
-try:
-    try:
-        raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])
-    except* AttributeError:
-        b = eval
-        raise
-    except* ValueError:
-        b = len
-except ExceptionGroup:
-    result = b("abc")
-''',
+              source(
+                  'b = eval',
+                  'try:',
+                  '    try:',
+                  '        raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])',
+                  '    except* AttributeError:',
+                  '        b = eval',
+                  '        raise',
+                  '    except* ValueError:',
+                  '        b = len',
+                  'except ExceptionGroup:',
+                  '    result = b("abc")',
+              ),
               3,
               dangerous=False,
           )
-
           execute(
               'bare_reraise_plus_later_subgroup_can_introduce_danger',
-              '''\
-b = len
-try:
-    try:
-        raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])
-    except* AttributeError:
-        b = len
-        raise
-    except* ValueError:
-        b = eval
-except ExceptionGroup:
-    result = b("1+1")
-''',
+              source(
+                  'b = len',
+                  'try:',
+                  '    try:',
+                  '        raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])',
+                  '    except* AttributeError:',
+                  '        b = len',
+                  '        raise',
+                  '    except* ValueError:',
+                  '        b = eval',
+                  'except ExceptionGroup:',
+                  '    result = b("1+1")',
+              ),
               2,
               dangerous=True,
           )
-
           execute(
               'three_handler_chain_last_matching_state_wins',
-              '''\
-b = eval
-try:
-    raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v"), TypeError("t")])
-except* AttributeError:
-    b = eval
-except* ValueError:
-    b = eval
-except* TypeError:
-    b = len
-result = b("abc")
-''',
+              source(
+                  'b = eval',
+                  'try:',
+                  '    raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v"), TypeError("t")])',
+                  'except* AttributeError:',
+                  '    b = eval',
+                  'except* ValueError:',
+                  '    b = eval',
+                  'except* TypeError:',
+                  '    b = len',
+                  'result = b("abc")',
+              ),
               3,
               dangerous=False,
           )
-
           execute(
               'three_handler_chain_last_matching_state_danger',
-              '''\
-b = len
-try:
-    raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v"), TypeError("t")])
-except* AttributeError:
-    b = len
-except* ValueError:
-    b = len
-except* TypeError:
-    b = eval
-result = b("1+1")
-''',
+              source(
+                  'b = len',
+                  'try:',
+                  '    raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v"), TypeError("t")])',
+                  'except* AttributeError:',
+                  '    b = len',
+                  'except* ValueError:',
+                  '    b = len',
+                  'except* TypeError:',
+                  '    b = eval',
+                  'result = b("1+1")',
+              ),
               2,
               dangerous=True,
           )
