@@ -1,4 +1,4 @@
-name: Probe R62N failed-star import ordering
+name: Probe exact R62N repaired freeze
 
 on:
   push:
@@ -11,19 +11,19 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Checkout exact Core candidate
         uses: actions/checkout@v4
         with:
           repository: mezas3238-hue/qore-core
-          ref: e87778368efc8887b50c1be94bae7381842ac3a6
+          ref: 35d48570b93473da7bfd4ae0a50073bc253cba76
           fetch-depth: 1
           persist-credentials: false
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12.14'
-      - name: Execute failed-star ordering probes
+      - name: Execute exact repaired R62N probes
         run: |
           python - <<'PY'
           import builtins
@@ -35,22 +35,88 @@ jobs:
           sys.path.insert(0, str(Path('tests/infrastructure').resolve()))
           n = importlib.import_module('test_universal_cross_asset_conformance_final_owner_r62n_guards')
 
-          def probe(name: str, order: list[str], expected_runtime: int) -> tuple[str, ...]:
-              module = types.ModuleType('qore_r62n_star_probe')
+          MODULE = 'qore_r62n_star_probe'
+
+          def install(order: list[str], **bindings: object) -> None:
+              module = types.ModuleType(MODULE)
               module.__all__ = order
-              module.b = builtins.eval
-              sys.modules['qore_r62n_star_probe'] = module
-              source = "b = len\ntry:\n    from qore_r62n_star_probe import *\nexcept AttributeError:\n    pass\nresult = b(\"1+1\")\n"
+              for name, value in bindings.items():
+                  setattr(module, name, value)
+              sys.modules[MODULE] = module
+
+          def execute(name: str, source: str, expected_runtime: int) -> tuple[str, ...]:
               namespace: dict[str, object] = {}
-              exec(compile(source, '<failed-star>', 'exec', dont_inherit=True), namespace)
+              exec(compile(source, f'<{name}>', 'exec', dont_inherit=True), namespace)
               markers = n._r62n_dynamic_execution_markers_from_source(source)
-              print(name, 'runtime=', namespace.get('result'), 'markers=', markers)
-              assert namespace.get('result') == expected_runtime
+              runtime = namespace.get('result')
+              print(name, 'runtime=', runtime, 'markers=', markers)
+              assert runtime == expected_runtime, (name, runtime, expected_runtime)
               return markers
 
-          danger = probe('star_partial_before_failure', ['b', 'missing'], 2)
-          safe = probe('star_failure_before_binding', ['missing', 'b'], 3)
-          if not danger:
-              raise AssertionError('material FN: failed star import lost earlier dangerous binding')
-          print('safe_inverse_observation=', safe)
+          try:
+              install(['b', 'missing'], b=builtins.eval)
+              source = (
+                  'b = len\n'
+                  'try:\n'
+                  f'    from {MODULE} import *\n'
+                  'except AttributeError:\n'
+                  '    pass\n'
+                  'result = b("1+1")\n'
+              )
+              markers = execute('star_partial_before_failure', source, 2)
+              assert markers, 'material FN: failed star import lost earlier dangerous binding'
+
+              install(['missing', 'b'], b=builtins.eval)
+              markers = execute('star_failure_before_binding', source, 3)
+              print('documented_conservative_star_order_observation=', markers)
+
+              install(['dynamic_alias'], dynamic_alias=builtins.eval)
+              source_success = (
+                  f'from {MODULE} import *\n'
+                  'result = dynamic_alias("1+1")\n'
+              )
+              markers = execute('star_success_new_dangerous_alias', source_success, 2)
+              assert markers, 'material FN: successful unknown star introduced untracked dangerous alias'
+
+              install(['b', 'missing'], b=builtins.eval)
+              source_outer_handler = (
+                  'b = len\n'
+                  'try:\n'
+                  '    try:\n'
+                  f'        from {MODULE} import *\n'
+                  '    finally:\n'
+                  '        marker = 1\n'
+                  'except AttributeError:\n'
+                  '    result = b("1+1")\n'
+              )
+              markers = execute('nested_star_finally_outer_handler', source_outer_handler, 2)
+              assert markers, 'material FN: nested failed-star exception state lost across finally/handler'
+
+              source_finalbody = (
+                  'b = len\n'
+                  'try:\n'
+                  f'    from {MODULE} import *\n'
+                  'except AttributeError:\n'
+                  '    pass\n'
+                  'finally:\n'
+                  '    result = b("1+1")\n'
+                  '    b = lambda _: 3\n'
+              )
+              markers = execute('failed_star_dangerous_finalbody_before_rebind', source_finalbody, 2)
+              assert markers, 'material FN: dangerous failed-star authority lost entering finalbody'
+
+              source_safe = (
+                  'b = len\n'
+                  'try:\n'
+                  '    try:\n'
+                  f'        from {MODULE} import *\n'
+                  '    finally:\n'
+                  '        b = lambda _: 3\n'
+                  'except AttributeError:\n'
+                  '    result = b("abc")\n'
+              )
+              markers = execute('nested_star_finally_proven_safe_rebind', source_safe, 3)
+              assert markers == (), f'unexpected FP after statically proven safe rebind: {markers}'
+          finally:
+              sys.modules.pop(MODULE, None)
           PY
