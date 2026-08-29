@@ -1,0 +1,51 @@
+name: Probe R62N plain-exception exact freeze
+
+on:
+  push:
+    paths:
+      - '.github/workflows/probe-r62n-plain-exception-freeze.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: mezas3238-hue/qore-core
+          ref: 7d16609795e99052db66281749aefe406172f870
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e '.[dev]'
+      - name: Adversarial plain-exception matrix
+        run: |
+          python - <<'PY'
+          import runpy
+          ns = runpy.run_path('tests/infrastructure/test_universal_cross_asset_conformance_final_owner_r62n_guards.py')
+          scan = ns['_r62n_dynamic_execution_markers_from_source']
+          runtime = ns['_runtime_result']
+          cases = [
+              ('claude_witness', '''b = eval\ntry:\n    try:\n        raise ValueError("v")\n    except* TypeError:\n        pass\nexcept ValueError:\n    result = b("1+1")\n''', 2, True),
+              ('claude_safe_inverse', '''b = len\ntry:\n    try:\n        raise ValueError("v")\n    except* TypeError:\n        b = eval\nexcept ValueError:\n    result = b("abc")\n''', 3, False),
+              ('plain_matching_safe_finally', '''b = eval\ntry:\n    try:\n        raise ValueError("v")\n    except* ValueError:\n        b = len\nfinally:\n    result = b("abc")\n''', 3, False),
+              ('plain_matching_danger_finally', '''b = len\ntry:\n    try:\n        raise ValueError("v")\n    except* ValueError:\n        b = eval\nfinally:\n    result = b("1+1")\n''', 2, True),
+              ('second_sibling_matches_safe', '''b = eval\ntry:\n    try:\n        raise ValueError("v")\n    except* TypeError:\n        b = eval\n    except* ValueError:\n        b = len\nfinally:\n    result = b("abc")\n''', 3, False),
+              ('second_sibling_matches_danger', '''b = len\ntry:\n    try:\n        raise ValueError("v")\n    except* TypeError:\n        b = len\n    except* ValueError:\n        b = eval\nfinally:\n    result = b("1+1")\n''', 2, True),
+          ]
+          for name, source, expected_runtime, dangerous in cases:
+              observed = runtime(source)
+              markers = scan(source)
+              calls = tuple(m for m in markers if m.startswith('call:'))
+              print(name, 'runtime=', observed, 'markers=', markers)
+              assert observed == expected_runtime, (name, observed)
+              assert bool(calls) is dangerous, (name, calls)
+          print('ALL_PLAIN_EXCEPTION_ADVERSARIAL_CASES_OK')
+          PY
+      - name: Permanent R62N regression suite
+        run: pytest -q tests/infrastructure/test_universal_cross_asset_conformance_final_owner_r62n_guards.py
