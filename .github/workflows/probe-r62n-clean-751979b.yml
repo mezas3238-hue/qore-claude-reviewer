@@ -1,0 +1,30 @@
+name: Probe R62N clean 751979b
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/probe-r62n-clean-751979b.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout reviewer payloads
+        uses: actions/checkout@v4
+      - name: Checkout exact clean Core candidate
+        uses: actions/checkout@v4
+        with:
+          repository: mezas3238-hue/qore-core
+          ref: 751979b55040186ad77e149981fcf5266eaedb14
+          path: core
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12.14'
+      - name: Execute historical and fresh adversarial probes
+        run: python .github/scripts/probe_r62n_clean_751979b.py
