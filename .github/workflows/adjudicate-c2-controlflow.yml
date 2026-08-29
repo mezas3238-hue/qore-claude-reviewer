@@ -1,4 +1,4 @@
-name: Probe R62N ordering and exception adjacencies
+name: Probe R62N freeze-candidate adversarial matrix
 
 on:
   push:
@@ -16,18 +16,18 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: mezas3238-hue/qore-core
-          ref: f5f62da1fb5367cd050b36be6fe59758ccde5f22
+          ref: 130b370f048d89b001a4f6decbd1879c1db24047
           fetch-depth: 1
           persist-credentials: false
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12.14'
-      - name: Execute ordering and exception matrix
+      - name: Execute adversarial matrix
         env:
-          PROBE_ZLIB_B64: 'eNrVl91P2zAQwN/zV3iWJhJWFcqkPVTrpH2wPexlD2iahpDlJJdiltjR2enalf7vOydp2kKBigEaeYlj+z5+d8nlHKiiNOhYc8tVHLQTdmaDDE3BSunOab7dwb7RY0CLfT/fV9oCuvCwx6zD0K+F3IF19kDpDCVNVomrEHjUR7Amn0AYRVGg2Whlsd+MRGHSKodGXlRaTQCtzEWCxlohrQUnEqMzg4XUCYhMaVo1vzWgwDdHWowrianlURAk0oIlE/OA0cUTU5Q5TEWWG4Opmgg3KwEQDYpU6jEgH7K9vb0UMoaVDqNhLYZAjms2BicdsY1zE8vchtEpj/lZj3GYyJz3WC6LOJVMDNnrKOSDVwNywOGs0TG4YAcH7PAigGkCpWMnZPjYG26W25DGlcodRZJJy+LWtq1yRwS1P0vpn4Dmk5ooq4xe0xLTvhz0NkGi6m3GgIL8pPgv/yt6n/w/pOcp8r4GfoPruwZgibjikVrTB6HGWtDIkKOkWMjM0adA3lWwwXfFTKfu4binQxbGbDjqbERkImymyFLUY4PodHAW/DuXlRk8OZVHWAF1jDdQrdFYXxwF1UAQhR0LIhLeXiUdpHemqHt4OKLGIXZCDvXW2HbIy60kT5mULQhdQu7MREZWGoDd0/Cw7ncVouX47D26DtLWjff1ps2isWuutrHenqhHeOFuxa1fvd1JV4Sk1TqJopQkQj1AppA6hkcu6SiVBXZcu0t+fkFTlSGfktjpd1+aasdDKgpfYdaOz5Z4+2y15T7/vv1O6eY/73ryr4bGArVM6fOKzZJqO/v9f5rL2MTGnd/8KTQKn3mQ7mqKFktApwoILSYtp6675kU97hz3F0whCX0XpfJ6PzG/LdHEcPSOe35apntqtBNKnwMqN/Ilmmh8OVtqacOobZ8iGfLGM96st4XgA7XuXYx8Lmh+eFVBxo9/fBzOfR8b0nrUF0LLAoRYDOf0vOABnRKYn6JzCSZMaVYfCfrKQWGXSS1RaRdmfO43Li7baIzm62F5gYvLQuIvOoqM5rrfHDTSGUmoRHjqqm5R2i3CH5iENRUmnTjh/QXo7zRN'
+          PROBE_ZLIB_B64: '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'
         run: |
           python - <<'PY'
           import base64, os, zlib
           script = zlib.decompress(base64.b64decode(os.environ['PROBE_ZLIB_B64'])).decode('utf-8')
-          exec(compile(script, '<r62n-ordering-probe>', 'exec'))
+          exec(compile(script, '<r62n-freeze-probe>', 'exec'))
           PY
