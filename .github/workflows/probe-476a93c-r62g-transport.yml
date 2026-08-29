@@ -1,0 +1,82 @@
+name: Probe 476a93c R62G transported builtins
+
+on:
+  push:
+    paths:
+      - '.github/workflows/probe-476a93c-r62g-transport.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout QORE Core exact head
+        uses: actions/checkout@v4
+        with:
+          repository: mezas3238-hue/qore-core
+          ref: 476a93cdd08a064d0b99a139cd1b49287b937f21
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install tooling
+        run: pip install -e '.[dev]'
+      - name: Adversarial R62G transport matrix
+        shell: bash
+        run: |
+          python - <<'PY'
+          import sys
+          sys.path.insert(0, 'tests/infrastructure')
+          import test_universal_cross_asset_conformance_final_owner_r62g_guards as r62g
+
+          SAFE = {
+              'direct_subscript': '''import builtins\ntry:\n    result = builtins["eval"]("1+1")\nexcept TypeError:\n    result = "blocked-by-python"\n''',
+              'direct_get': '''import builtins\ntry:\n    result = builtins.get("eval")("1+1")\nexcept AttributeError:\n    result = "blocked-by-python"\n''',
+              'direct_dunder_getitem': '''import builtins\ntry:\n    result = builtins.__getitem__("eval")("1+1")\nexcept AttributeError:\n    result = "blocked-by-python"\n''',
+              'operator_getitem': '''import builtins, operator\ntry:\n    result = operator.getitem(builtins, "eval")("1+1")\nexcept TypeError:\n    result = "blocked-by-python"\n''',
+              'itemgetter': '''import builtins\nfrom operator import itemgetter\ntry:\n    result = itemgetter("eval")(builtins)("1+1")\nexcept TypeError:\n    result = "blocked-by-python"\n''',
+              'tuple_alias': '''import builtins\nbox = (builtins,)\nb = box[0]\ntry:\n    result = b["eval"]("1+1")\nexcept TypeError:\n    result = "blocked-by-python"\n''',
+              'inline_tuple': '''import builtins\ntry:\n    result = (builtins,)[0]["eval"]("1+1")\nexcept TypeError:\n    result = "blocked-by-python"\n''',
+              'list_alias': '''import builtins\nbox = [builtins]\nb = box[0]\ntry:\n    result = b["eval"]("1+1")\nexcept TypeError:\n    result = "blocked-by-python"\n''',
+          }
+
+          DANGEROUS = {
+              'attribute': '''import builtins\nresult = builtins.eval("1+1")\n''',
+              'getattr_attribute': '''import builtins\nresult = getattr(builtins, "eval")("1+1")\n''',
+              'builtins_dict': '''import builtins\nresult = builtins.__dict__["eval"]("1+1")\n''',
+              'vars_builtins': '''import builtins\nresult = vars(builtins)["eval"]("1+1")\n''',
+              'explicit_mapping': '''import builtins\nm = builtins.__dict__\nresult = m["eval"]("1+1")\n''',
+              'mapping_transport': '''import builtins\nbox = (builtins.__dict__,)\nm = box[0]\nresult = m["eval"]("1+1")\n''',
+          }
+
+          for name, source in SAFE.items():
+              ns = {}
+              exec(source, ns)
+              assert ns['result'] == 'blocked-by-python', (name, ns['result'])
+              markers = r62g._r62g_dynamic_execution_markers_from_source(source)
+              assert not any(m.startswith('call:') for m in markers), (name, markers)
+              print('SAFE OK', name, markers)
+
+          for name, source in DANGEROUS.items():
+              ns = {}
+              exec(source, ns)
+              assert ns['result'] == 2, (name, ns['result'])
+              markers = r62g._r62g_dynamic_execution_markers_from_source(source)
+              assert any(m.startswith('call:') for m in markers), (name, markers)
+              print('DANGER OK', name, markers)
+
+          # Conservative union: either a module or a true mapping. Scanner must not
+          # certify the mapping operation as definitely-safe merely because one branch
+          # is the non-subscriptable module object.
+          union = '''import builtins\nflag = bool(input)\nx = builtins if flag else builtins.__dict__\nresult = x["eval"]("1+1")\n'''
+          markers = r62g._r62g_dynamic_execution_markers_from_source(union)
+          assert any(m.startswith('call:') for m in markers), markers
+          print('UNION FAIL-CLOSED OK', markers)
+          PY
+      - name: Permanent R62G and R62N suites
+        run: |
+          pytest -q tests/infrastructure/test_universal_cross_asset_conformance_final_owner_r62g_guards.py
+          pytest -q tests/infrastructure/test_universal_cross_asset_conformance_final_owner_r62n_guards.py
