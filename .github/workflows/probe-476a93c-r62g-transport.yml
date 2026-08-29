@@ -21,7 +21,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.12.14'
       - name: Install tooling
         run: pip install -e '.[dev]'
       - name: Adversarial R62G transport matrix
@@ -75,6 +75,97 @@ jobs:
           markers = r62g._r62g_dynamic_execution_markers_from_source(union)
           assert any(m.startswith('call:') for m in markers), markers
           print('UNION FAIL-CLOSED OK', markers)
+          PY
+      - name: R62G runtime-context evidence integrity
+        shell: bash
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+
+          import contextlib
+          import hashlib
+          import io
+          import subprocess
+          import sys
+
+          sys.path.insert(0, 'tests/infrastructure')
+          import test_universal_cross_asset_conformance_final_owner_r62g_guards as r62g
+
+          SOURCES = {
+              'explicit_builtins_module_subscript_safe': (
+                  'import builtins\n'
+                  'result = builtins["eval"]("1+1")\n'
+                  'print(result)\n'
+              ),
+              'builtins_dict_dangerous': (
+                  'import builtins\n'
+                  'result = builtins.__dict__["eval"]("1+1")\n'
+                  'print(result)\n'
+              ),
+              'explicit_dunder_mapping_dangerous': (
+                  '__builtins__ = {"eval": eval}\n'
+                  'result = __builtins__["eval"]("1+1")\n'
+                  'print(result)\n'
+              ),
+              'dunder_context_sensitive': (
+                  'result = globals()["__builtins__"]["eval"]("1+1")\n'
+                  'print(result)\n'
+              ),
+              'imported_builtins_dict_context_sensitive': (
+                  'from builtins import __dict__ as namespace\n'
+                  'result = namespace["globals"]()["__builtins__"]["eval"]("1+1")\n'
+                  'print(result)\n'
+              ),
+          }
+
+          def runtime_main(source: str) -> str:
+              completed = subprocess.run(
+                  [sys.executable, '-I', '-B', '-c', source],
+                  text=True,
+                  stdout=subprocess.PIPE,
+                  stderr=subprocess.PIPE,
+                  check=False,
+              )
+              if completed.returncode:
+                  last = completed.stderr.strip().splitlines()[-1]
+                  return f'EXCEPTION {last}'
+              return completed.stdout.strip()
+
+          def runtime_imported(source: str) -> str:
+              namespace: dict[str, object] = {}
+              try:
+                  with contextlib.redirect_stdout(io.StringIO()):
+                      exec(compile(source, '<qore-claude-context-probe>', 'exec'), namespace)
+              except Exception as exc:
+                  return f'EXCEPTION {type(exc).__name__}: {exc}'
+              return repr(namespace.get('result'))
+
+          evidence = {}
+          for label, source in SOURCES.items():
+              evidence[label] = {
+                  'sha256': hashlib.sha256(source.encode('utf-8')).hexdigest(),
+                  'main': runtime_main(source),
+                  'imported': runtime_imported(source),
+                  'r62g': r62g._r62g_dynamic_execution_markers_from_source(source),
+              }
+
+          assert 'TypeError' in evidence['explicit_builtins_module_subscript_safe']['main']
+          assert 'TypeError' in evidence['explicit_builtins_module_subscript_safe']['imported']
+          assert evidence['explicit_builtins_module_subscript_safe']['r62g'] == ()
+
+          for label in ('builtins_dict_dangerous', 'explicit_dunder_mapping_dangerous'):
+              assert evidence[label]['main'] == '2'
+              assert evidence[label]['imported'] == '2'
+              assert any(marker.startswith('call:') for marker in evidence[label]['r62g'])
+
+          for label in ('dunder_context_sensitive', 'imported_builtins_dict_context_sensitive'):
+              assert 'TypeError' in evidence[label]['main']
+              assert evidence[label]['imported'] == '2'
+              assert any(marker.startswith('call:') for marker in evidence[label]['r62g'])
+
+          for label, values in evidence.items():
+              print(label, values)
+          print('CLAUDE_R62G_RUNTIME_CONTEXT_EVIDENCE_OK')
           PY
       - name: Permanent R62G and R62N suites
         run: |
