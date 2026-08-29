@@ -1,4 +1,4 @@
-name: Probe R62N current freeze candidate
+name: Probe R62N failed-star import ordering
 
 on:
   push:
@@ -13,37 +13,50 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Checkout probe source
-        uses: actions/checkout@v4
-        with:
-          repository: mezas3238-hue/qore-claude-reviewer
-          ref: main
-          path: reviewer
-          persist-credentials: false
       - name: Checkout exact Core candidate
         uses: actions/checkout@v4
         with:
           repository: mezas3238-hue/qore-core
           ref: 9a3b44e6b19fab5e9cd72ef9013d031b6ef0cc6d
-          path: core
           fetch-depth: 1
           persist-credentials: false
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12.14'
-      - name: Execute prior falsification matrix on exact candidate
-        working-directory: core
+      - name: Execute failed-star ordering probes
         run: |
           python - <<'PY'
-          import base64
-          import re
-          import zlib
+          import builtins
+          import importlib
+          import sys
+          import types
           from pathlib import Path
 
-          workflow = Path('../reviewer/.github/workflows/adjudicate-c2-controlflow.yml').read_text()
-          match = re.search(r"PROBE_ZLIB_B64: '([^']+)'", workflow)
-          if match is None:
-              raise SystemExit('canonical adversarial probe payload not found')
-          script = zlib.decompress(base64.b64decode(match.group(1))).decode('utf-8')
-          exec(compile(script, '<r62n-current-freeze-probe>', 'exec'))
+          sys.path.insert(0, str(Path('tests/infrastructure').resolve()))
+          n = importlib.import_module('test_universal_cross_asset_conformance_final_owner_r62n_guards')
+
+          def probe(name: str, order: list[str], expected_runtime: int) -> tuple[str, ...]:
+              module = types.ModuleType('qore_r62n_star_probe')
+              module.__all__ = order
+              module.b = builtins.eval
+              sys.modules['qore_r62n_star_probe'] = module
+              source = '''b = len
+try:
+    from qore_r62n_star_probe import *
+except AttributeError:
+    pass
+result = b("1+1")
+'''
+              namespace: dict[str, object] = {}
+              exec(compile(source, '<failed-star>', 'exec', dont_inherit=True), namespace)
+              markers = n._r62n_dynamic_execution_markers_from_source(source)
+              print(name, 'runtime=', namespace.get('result'), 'markers=', markers)
+              assert namespace.get('result') == expected_runtime
+              return markers
+
+          danger = probe('star_partial_before_failure', ['b', 'missing'], 2)
+          safe = probe('star_failure_before_binding', ['missing', 'b'], 3)
+          if not danger:
+              raise AssertionError('material FN: failed star import lost earlier dangerous binding')
+          print('safe_inverse_observation=', safe)
           PY
