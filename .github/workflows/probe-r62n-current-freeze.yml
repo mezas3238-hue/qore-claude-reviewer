@@ -17,7 +17,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: mezas3238-hue/qore-core
-          ref: 35d48570b93473da7bfd4ae0a50073bc253cba76
+          ref: 903c0e2e221f51df705873f90ff9ec18d58101fe
           fetch-depth: 1
           persist-credentials: false
       - uses: actions/setup-python@v6
@@ -117,6 +117,68 @@ jobs:
               )
               markers = execute('nested_star_finally_proven_safe_rebind', source_safe, 3)
               assert markers == (), f'unexpected FP after statically proven safe rebind: {markers}'
+
+              install(['b', 'missing'], b=builtins.eval)
+              trystar_handler = (
+                  'b = len\n'
+                  'try:\n'
+                  f'    from {MODULE} import *\n'
+                  'except* AttributeError:\n'
+                  '    result = b("1+1")\n'
+              )
+              markers = execute('trystar_handler_partial_authority', trystar_handler, 2)
+              assert markers, 'material FN: TryStar handler lost failed-star partial authority'
+
+              trystar_downstream = (
+                  'b = len\n'
+                  'try:\n'
+                  f'    from {MODULE} import *\n'
+                  'except* AttributeError:\n'
+                  '    pass\n'
+                  'result = b("1+1")\n'
+              )
+              markers = execute('trystar_downstream_partial_authority', trystar_downstream, 2)
+              assert markers, 'material FN: TryStar successor lost failed-star partial authority'
+
+              trystar_nested_handler = (
+                  'b = len\n'
+                  'try:\n'
+                  '    try:\n'
+                  f'        from {MODULE} import *\n'
+                  '    finally:\n'
+                  '        marker = 1\n'
+                  'except* AttributeError:\n'
+                  '    result = b("1+1")\n'
+              )
+              markers = execute('trystar_nested_finally_handler', trystar_nested_handler, 2)
+              assert markers, 'material FN: TryStar nested finally lost partial authority'
+
+              trystar_finalbody = (
+                  'b = len\n'
+                  'try:\n'
+                  f'    from {MODULE} import *\n'
+                  'except* AttributeError:\n'
+                  '    pass\n'
+                  'finally:\n'
+                  '    result = b("1+1")\n'
+                  '    b = lambda _: 3\n'
+              )
+              markers = execute('trystar_dangerous_finalbody_before_rebind', trystar_finalbody, 2)
+              assert markers, 'material FN: TryStar finalbody lost partial authority'
+
+              trystar_safe = (
+                  'b = len\n'
+                  'try:\n'
+                  '    try:\n'
+                  f'        from {MODULE} import *\n'
+                  '    finally:\n'
+                  '        b = lambda _: 3\n'
+                  'except* AttributeError:\n'
+                  '    pass\n'
+                  'result = b("abc")\n'
+              )
+              markers = execute('trystar_proven_runtime_safe_rebind', trystar_safe, 3)
+              print('documented_conservative_trystar_safe_rebind_observation=', markers)
           finally:
               sys.modules.pop(MODULE, None)
           PY
