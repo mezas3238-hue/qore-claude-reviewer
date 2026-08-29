@@ -13,18 +13,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: Checkout isolated repair staging
+      - name: Checkout clean candidate
         uses: actions/checkout@v4
         with:
           repository: mezas3238-hue/qore-core
-          ref: 2a921a60ccdb5c58159387771983ebf5c65c4560
+          ref: 69b8afb392e6d57cc13c68cb964f7f3365d25d46
           fetch-depth: 1
           persist-credentials: false
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12.14'
-      - name: Apply candidate repair in worktree
-        run: python .github/scripts/r62n_trystar_bare_reraise_patch.py
       - name: Falsify mixed pending exception semantics
         run: |
           python - <<'PY'
@@ -38,9 +36,9 @@ jobs:
           def src(*lines: str) -> str:
               return '\n'.join(lines) + '\n'
 
-          def run(name: str, text: str, expected: object, dangerous: bool) -> None:
+          def run(name: str, text: str, expected: object, dangerous: bool, *, expected_caught: type[BaseException] | None = None) -> None:
               ns: dict[str, object] = {}
-              caught = None
+              caught: BaseException | None = None
               try:
                   exec(compile(text, f'<{name}>', 'exec', dont_inherit=True), ns)
               except BaseException as exc:
@@ -49,47 +47,77 @@ jobs:
               calls = tuple(m for m in markers if m.startswith('call:'))
               print(name, 'runtime=', ns.get('result'), 'caught=', type(caught).__name__ if caught else None, 'markers=', markers)
               assert ns.get('result') == expected
-              assert caught is None
+              if expected_caught is None:
+                  assert caught is None
+              else:
+                  assert isinstance(caught, expected_caught)
               if dangerous:
                   assert calls, (name, 'FN', markers)
               else:
                   assert calls == (), (name, 'FP', markers)
 
-          run('bare_reraise_plus_new_exception_safe', src(
+          run('bare_plus_new_safe', src(
               'b = eval','try:','    try:','        raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])',
               '    except* AttributeError:','        b = eval','        raise',
               '    except* ValueError:','        b = len','        raise TypeError("new")',
               'except BaseExceptionGroup:','    result = b("abc")'), 3, False)
 
-          run('bare_reraise_plus_new_exception_danger', src(
+          run('bare_plus_new_danger', src(
               'b = len','try:','    try:','        raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])',
               '    except* AttributeError:','        b = len','        raise',
               '    except* ValueError:','        b = eval','        raise TypeError("new")',
               'except BaseExceptionGroup:','    result = b("1+1")'), 2, True)
 
-          run('new_exception_then_bare_reraise_safe', src(
+          run('new_then_bare_safe', src(
               'b = eval','try:','    try:','        raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])',
               '    except* AttributeError:','        b = eval','        raise TypeError("new")',
               '    except* ValueError:','        b = len','        raise',
               'except BaseExceptionGroup:','    result = b("abc")'), 3, False)
 
-          run('new_exception_then_bare_reraise_danger', src(
+          run('new_then_bare_danger', src(
               'b = len','try:','    try:','        raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])',
               '    except* AttributeError:','        b = len','        raise TypeError("new")',
               '    except* ValueError:','        b = eval','        raise',
               'except BaseExceptionGroup:','    result = b("1+1")'), 2, True)
 
-          run('bare_reraise_plus_new_exception_finally_safe', src(
+          # finally observes the completed except* chain before the combined group escapes
+          run('mixed_finally_safe', src(
+              'b = eval','try:','    raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])',
+              'except* AttributeError:','    b = eval','    raise',
+              'except* ValueError:','    b = len','    raise TypeError("new")',
+              'finally:','    result = b("abc")'), 3, False, expected_caught=BaseExceptionGroup)
+
+          run('mixed_finally_danger', src(
+              'b = len','try:','    raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])',
+              'except* AttributeError:','    b = len','    raise',
+              'except* ValueError:','    b = eval','    raise TypeError("new")',
+              'finally:','    result = b("1+1")'), 2, True, expected_caught=BaseExceptionGroup)
+
+          # The combined propagated object remains catchable as ExceptionGroup and uses final handler state.
+          run('outer_exceptiongroup_safe', src(
               'b = eval','try:','    try:','        raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])',
               '    except* AttributeError:','        b = eval','        raise',
               '    except* ValueError:','        b = len','        raise TypeError("new")',
-              '    finally:','        result = b("abc")','except BaseExceptionGroup:','    pass'), 3, False)
+              'except ExceptionGroup:','    result = b("abc")'), 3, False)
 
-          run('bare_reraise_plus_new_exception_finally_danger', src(
+          run('outer_exceptiongroup_danger', src(
               'b = len','try:','    try:','        raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])',
               '    except* AttributeError:','        b = len','        raise',
               '    except* ValueError:','        b = eval','        raise TypeError("new")',
-              '    finally:','        result = b("1+1")','except BaseExceptionGroup:','    pass'), 2, True)
+              'except ExceptionGroup:','    result = b("1+1")'), 2, True)
 
-          print('MIXED_PENDING_MATRIX_OK 6 cases')
+          # Outer except* routing must retain the newly raised TypeError member.
+          run('outer_star_type_safe', src(
+              'b = eval','try:','    try:','        raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])',
+              '    except* AttributeError:','        b = eval','        raise',
+              '    except* ValueError:','        b = len','        raise TypeError("new")',
+              'except* TypeError:','    result = b("abc")','except* AttributeError:','    pass'), 3, False)
+
+          run('outer_star_type_danger', src(
+              'b = len','try:','    try:','        raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])',
+              '    except* AttributeError:','        b = len','        raise',
+              '    except* ValueError:','        b = eval','        raise TypeError("new")',
+              'except* TypeError:','    result = b("1+1")','except* AttributeError:','    pass'), 2, True)
+
+          print('CLEAN_MIXED_PENDING_MATRIX_OK 10 cases')
           PY
