@@ -1,0 +1,49 @@
+name: Probe R62N current freeze candidate
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/probe-r62n-current-freeze.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout probe source
+        uses: actions/checkout@v4
+        with:
+          repository: mezas3238-hue/qore-claude-reviewer
+          ref: main
+          path: reviewer
+          persist-credentials: false
+      - name: Checkout exact Core candidate
+        uses: actions/checkout@v4
+        with:
+          repository: mezas3238-hue/qore-core
+          ref: 9a3b44e6b19fab5e9cd72ef9013d031b6ef0cc6d
+          path: core
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12.14'
+      - name: Execute prior falsification matrix on exact candidate
+        working-directory: core
+        run: |
+          python - <<'PY'
+          import base64
+          import re
+          import zlib
+          from pathlib import Path
+
+          workflow = Path('../reviewer/.github/workflows/adjudicate-c2-controlflow.yml').read_text()
+          match = re.search(r"PROBE_ZLIB_B64: '([^']+)'", workflow)
+          if match is None:
+              raise SystemExit('canonical adversarial probe payload not found')
+          script = zlib.decompress(base64.b64decode(match.group(1))).decode('utf-8')
+          exec(compile(script, '<r62n-current-freeze-probe>', 'exec'))
+          PY
