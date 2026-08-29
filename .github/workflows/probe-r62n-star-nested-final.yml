@@ -67,6 +67,9 @@ jobs:
               'handler_order_preserves_danger': (
                   'b = len\ntry:\n    try:\n        from ' + module_name + ' import *\n    finally:\n        marker = 1\nexcept KeyError:\n    b = lambda _: 3\nexcept AttributeError:\n    result = b("1+1")\n', 2, True,
               ),
+              'trystar_failed_star_handler_danger': (
+                  'b = len\ntry:\n    from ' + module_name + ' import *\nexcept* AttributeError:\n    result = b("1+1")\n', 2, True,
+              ),
           }
 
           try:
