@@ -17,7 +17,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: mezas3238-hue/qore-core
-          ref: 9a3b44e6b19fab5e9cd72ef9013d031b6ef0cc6d
+          ref: e87778368efc8887b50c1be94bae7381842ac3a6
           fetch-depth: 1
           persist-credentials: false
       - uses: actions/setup-python@v6
