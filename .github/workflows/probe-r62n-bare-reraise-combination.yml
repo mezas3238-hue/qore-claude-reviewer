@@ -1,0 +1,95 @@
+name: Probe R62N bare reraise combinations
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/probe-r62n-bare-reraise-combination.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout isolated repair staging
+        uses: actions/checkout@v4
+        with:
+          repository: mezas3238-hue/qore-core
+          ref: d310519f611faf76d449383dc58ab116fb9aa0eb
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12.14'
+      - name: Apply candidate repair in worktree
+        run: python .github/scripts/r62n_trystar_bare_reraise_patch.py
+      - name: Falsify mixed pending exception semantics
+        run: |
+          python - <<'PY'
+          import importlib
+          import sys
+          from pathlib import Path
+
+          sys.path.insert(0, str(Path('tests/infrastructure').resolve()))
+          n = importlib.import_module('test_universal_cross_asset_conformance_final_owner_r62n_guards')
+
+          def src(*lines: str) -> str:
+              return '\n'.join(lines) + '\n'
+
+          def run(name: str, text: str, expected: object, dangerous: bool) -> None:
+              ns: dict[str, object] = {}
+              caught = None
+              try:
+                  exec(compile(text, f'<{name}>', 'exec', dont_inherit=True), ns)
+              except BaseException as exc:
+                  caught = exc
+              markers = n._r62n_dynamic_execution_markers_from_source(text)
+              calls = tuple(m for m in markers if m.startswith('call:'))
+              print(name, 'runtime=', ns.get('result'), 'caught=', type(caught).__name__ if caught else None, 'markers=', markers)
+              assert ns.get('result') == expected
+              assert caught is None
+              if dangerous:
+                  assert calls, (name, 'FN', markers)
+              else:
+                  assert calls == (), (name, 'FP', markers)
+
+          run('bare_reraise_plus_new_exception_safe', src(
+              'b = eval','try:','    try:','        raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])',
+              '    except* AttributeError:','        b = eval','        raise',
+              '    except* ValueError:','        b = len','        raise TypeError("new")',
+              'except BaseExceptionGroup:','    result = b("abc")'), 3, False)
+
+          run('bare_reraise_plus_new_exception_danger', src(
+              'b = len','try:','    try:','        raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])',
+              '    except* AttributeError:','        b = len','        raise',
+              '    except* ValueError:','        b = eval','        raise TypeError("new")',
+              'except BaseExceptionGroup:','    result = b("1+1")'), 2, True)
+
+          run('new_exception_then_bare_reraise_safe', src(
+              'b = eval','try:','    try:','        raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])',
+              '    except* AttributeError:','        b = eval','        raise TypeError("new")',
+              '    except* ValueError:','        b = len','        raise',
+              'except BaseExceptionGroup:','    result = b("abc")'), 3, False)
+
+          run('new_exception_then_bare_reraise_danger', src(
+              'b = len','try:','    try:','        raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])',
+              '    except* AttributeError:','        b = len','        raise TypeError("new")',
+              '    except* ValueError:','        b = eval','        raise',
+              'except BaseExceptionGroup:','    result = b("1+1")'), 2, True)
+
+          run('bare_reraise_plus_new_exception_finally_safe', src(
+              'b = eval','try:','    try:','        raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])',
+              '    except* AttributeError:','        b = eval','        raise',
+              '    except* ValueError:','        b = len','        raise TypeError("new")',
+              '    finally:','        result = b("abc")','except BaseExceptionGroup:','    pass'), 3, False)
+
+          run('bare_reraise_plus_new_exception_finally_danger', src(
+              'b = len','try:','    try:','        raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])',
+              '    except* AttributeError:','        b = len','        raise',
+              '    except* ValueError:','        b = eval','        raise TypeError("new")',
+              '    finally:','        result = b("1+1")','except BaseExceptionGroup:','    pass'), 2, True)
+
+          print('MIXED_PENDING_MATRIX_OK 6 cases')
+          PY
