@@ -11,19 +11,155 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
-      - name: Checkout exact Core freeze
+      - name: Checkout exact Core staging
         uses: actions/checkout@v4
         with:
           repository: mezas3238-hue/qore-core
-          ref: cb5d264dac42f2bf3b6f12acb8da070efd7c8191
+          ref: 1f5dc74085a2949e4c338c7d72040391d4a2cbc0
           fetch-depth: 1
           persist-credentials: false
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12.14'
-      - name: Reproduce cross-handler state semantics
-        env:
-          PROBE_B64: aW1wb3J0IGJ1aWx0aW5zCmltcG9ydCBpbXBvcnRsaWIKaW1wb3J0IHN5cwppbXBvcnQgdHlwZXMKZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCgpzeXMucGF0aC5pbnNlcnQoMCwgc3RyKFBhdGgoInRlc3RzL2luZnJhc3RydWN0dXJlIikucmVzb2x2ZSgpKSkKbiA9IGltcG9ydGxpYi5pbXBvcnRfbW9kdWxlKCJ0ZXN0X3VuaXZlcnNhbF9jcm9zc19hc3NldF9jb25mb3JtYW5jZV9maW5hbF9vd25lcl9yNjJuX2d1YXJkcyIpCm1vZHVsZV9uYW1lID0gInFvcmVfcjYybl9jcm9zc19oYW5kbGVyX3Byb2JlIgoKZGVmIGluc3RhbGwoKSAtPiBOb25lOgogICAgbW9kdWxlID0gdHlwZXMuTW9kdWxlVHlwZShtb2R1bGVfbmFtZSkKICAgIG1vZHVsZS5fX2FsbF9fID0gWyJiIiwgIm1pc3NpbmciXQogICAgbW9kdWxlLmIgPSBidWlsdGlucy5ldmFsCiAgICBzeXMubW9kdWxlc1ttb2R1bGVfbmFtZV0gPSBtb2R1bGUKCmRlZiBleGVjdXRlKG5hbWU6IHN0ciwgc291cmNlOiBzdHIsIGV4cGVjdGVkOiBpbnQpIC0+IHR1cGxlW3N0ciwgLi4uXToKICAgIG5hbWVzcGFjZTogZGljdFtzdHIsIG9iamVjdF0gPSB7fQogICAgZXhlYyhjb21waWxlKHNvdXJjZSwgZiI8e25hbWV9PiIsICJleGVjIiwgZG9udF9pbmhlcml0PVRydWUpLCBuYW1lc3BhY2UpCiAgICBtYXJrZXJzID0gbi5fcjYybl9keW5hbWljX2V4ZWN1dGlvbl9tYXJrZXJzX2Zyb21fc291cmNlKHNvdXJjZSkKICAgIHByaW50KG5hbWUsICJydW50aW1lPSIsIG5hbWVzcGFjZS5nZXQoInJlc3VsdCIpLCAibWFya2Vycz0iLCBtYXJrZXJzKQogICAgYXNzZXJ0IG5hbWVzcGFjZS5nZXQoInJlc3VsdCIpID09IGV4cGVjdGVkCiAgICByZXR1cm4gbWFya2VycwoKdHJ5OgogICAgaW5zdGFsbCgpCiAgICBzYWZlX3JlYmluZCA9IGYiIiJcCmIgPSBsZW4KdHJ5OgogICAgdHJ5OgogICAgICAgIGZyb20ge21vZHVsZV9uYW1lfSBpbXBvcnQgKgogICAgZXhjZXB0IEF0dHJpYnV0ZUVycm9yOgogICAgICAgIHJhaXNlIEV4Y2VwdGlvbkdyb3VwKCJlZyIsIFtBdHRyaWJ1dGVFcnJvcigiYSIpLCBWYWx1ZUVycm9yKCJ2IildKQpleGNlcHQqIEF0dHJpYnV0ZUVycm9yOgogICAgYiA9IGxhbWJkYSBfOiAzCmV4Y2VwdCogVmFsdWVFcnJvcjoKICAgIHJlc3VsdCA9IGIoIjErMSIpCiIiIgogICAgdW5zYWZlX2NvbnRyb2wgPSBmIiIiXApiID0gbGVuCnRyeToKICAgIHRyeToKICAgICAgICBmcm9tIHttb2R1bGVfbmFtZX0gaW1wb3J0ICoKICAgIGV4Y2VwdCBBdHRyaWJ1dGVFcnJvcjoKICAgICAgICByYWlzZSBFeGNlcHRpb25Hcm91cCgiZWciLCBbQXR0cmlidXRlRXJyb3IoImEiKSwgVmFsdWVFcnJvcigidikiKV0pCmV4Y2VwdCogQXR0cmlidXRlRXJyb3I6CiAgICBwYXNzCmV4Y2VwdCogVmFsdWVFcnJvcjoKICAgIHJlc3VsdCA9IGIoIjErMSIpCiIiIgogICAgaW50cm9kdWNlZF9kYW5nZXIgPSAiIiJcCmIgPSBsZW4KdHJ5OgogICAgcmFpc2UgRXhjZXB0aW9uR3JvdXAoImVnIiwgW0F0dHJpYnV0ZUVycm9yKCJhIiksIFZhbHVlRXJyb3IoInYiKV0pCmV4Y2VwdCogQXR0cmlidXRlRXJyb3I6CiAgICBiID0gZXZhbApleGNlcHQqIFZhbHVlRXJyb3I6CiAgICByZXN1bHQgPSBiKCIxKzEiKQoiIiIKICAgIHNhZmVfbWFya2VycyA9IGV4ZWN1dGUoInNhZmVfcmViaW5kX2ZpcnN0X2hhbmRsZXIiLCBzYWZlX3JlYmluZCwgMykKICAgIHVuc2FmZV9tYXJrZXJzID0gZXhlY3V0ZSgidW5zYWZlX2NvbnRyb2wiLCB1bnNhZmVfY29udHJvbCwgMikKICAgIGludHJvZHVjZWRfbWFya2VycyA9IGV4ZWN1dGUoImRhbmdlcl9pbnRyb2R1Y2VkX2ZpcnN0X2hhbmRsZXIiLCBpbnRyb2R1Y2VkX2RhbmdlciwgMikKICAgIHByaW50KCJTQUZFX01BUktFUlMiLCBzYWZlX21hcmtlcnMpCiAgICBwcmludCgiVU5TQUZFX01BUktFUlMiLCB1bnNhZmVfbWFya2VycykKICAgIHByaW50KCJJTlRST0RVQ0VEX01BUktFUlMiLCBpbnRyb2R1Y2VkX21hcmtlcnMpCmZpbmFsbHk6CiAgICBzeXMubW9kdWxlcy5wb3AobW9kdWxlX25hbWUsIE5vbmUpCg==
-        run: python -c 'import base64, os; exec(compile(base64.b64decode(os.environ["PROBE_B64"]), "<probe>", "exec"))'
+      - name: Apply unpublished bounded patch in workspace
+        run: python .github/patches/r62n_trystar_cross_handler_patch.txt
+      - name: Install
+        run: pip install -e '.[dev]'
+      - name: Diagnose precision fallback and finalbody sequencing
+        run: |
+          python - <<'PY'
+          import builtins
+          import importlib
+          import sys
+          from pathlib import Path
+
+          sys.path.insert(0, str(Path('tests/infrastructure').resolve()))
+          n = importlib.import_module('test_universal_cross_asset_conformance_final_owner_r62n_guards')
+          module_name = 'qore_r62n_precision_probe'
+          module = n._R62NStarImportModule(module_name)
+          module.__all__ = ['b', 'missing']
+          module.b = builtins.eval
+          sys.modules[module_name] = module
+
+          def execute(source: str) -> object:
+              namespace: dict[str, object] = {}
+              exec(compile(source, '<probe>', 'exec', dont_inherit=True), namespace)
+              return namespace.get('result')
+
+          safe = f'''\
+          b = len
+          try:
+              try:
+                  from {module_name} import *
+              except AttributeError:
+                  raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])
+          except* AttributeError:
+              b = lambda _: 3
+          except* ValueError:
+              result = b("1+1")
+          '''
+          unsafe = f'''\
+          b = len
+          try:
+              try:
+                  from {module_name} import *
+              except AttributeError:
+                  raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])
+          except* AttributeError:
+              pass
+          except* ValueError:
+              result = b("1+1")
+          '''
+          introduced = '''\
+          b = len
+          try:
+              raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])
+          except* AttributeError:
+              b = eval
+          except* ValueError:
+              result = b("1+1")
+          '''
+          final_safe = '''\
+          b = len
+          try:
+              raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])
+          except* AttributeError:
+              b = eval
+          except* ValueError:
+              b = lambda _: 3
+          finally:
+              result = b("1+1")
+          '''
+          final_danger = '''\
+          b = len
+          try:
+              raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])
+          except* AttributeError:
+              b = lambda _: 3
+          except* ValueError:
+              b = eval
+          finally:
+              result = b("1+1")
+          '''
+
+          def dump(label: str, source: str) -> None:
+              observations, timeline, precision_lost = n._r62n_flow(source)
+              fallback = n._r62n_future_authority_by_call(source, timeline)
+              owner_by_call = n._r62k._r62k_top_level_owner_calls(source)
+              escaped = n._r62k._r62k_escaped_owners(source)
+              print(label, 'runtime=', execute(source), 'precision_lost=', precision_lost)
+              for position in n._r62j._r62j_deferred_call_top_indexes(source):
+                  owner = owner_by_call.get(position)
+                  states = observations.get(owner) if owner is not None else None
+                  authority = n._r62k._r62k_authority_from_states(states) if states else None
+                  print(label, 'position=', position, 'owner=', owner, 'escaped=', owner in escaped if owner else None)
+                  print(label, 'observation_authority=', authority)
+                  print(label, 'fallback=', fallback.get(position))
+              print(label, 'markers_current=', n._r62n_dynamic_execution_markers_from_source(source))
+
+          for label, source in (
+              ('safe', safe),
+              ('unsafe', unsafe),
+              ('introduced', introduced),
+              ('final_safe', final_safe),
+              ('final_danger', final_danger),
+          ):
+              dump(label, source)
+
+          original = n._r62n_observable_authority_by_call
+          def prefer_observations(source: str):
+              observations, timeline, precision_lost = n._r62n_flow(source)
+              fallback = n._r62n_future_authority_by_call(source, timeline)
+              owner_by_call = n._r62k._r62k_top_level_owner_calls(source)
+              escaped = n._r62k._r62k_escaped_owners(source)
+              result = {}
+              for position in n._r62j._r62j_deferred_call_top_indexes(source):
+                  owner = owner_by_call.get(position)
+                  if owner is not None and owner not in escaped:
+                      states = observations.get(owner)
+                      if states:
+                          authority = n._r62k._r62k_authority_from_states(states)
+                          if authority:
+                              result[position] = authority
+                          continue
+                  future = fallback.get(position)
+                  if future:
+                      result[position] = future
+              return result
+
+          n._r62n_observable_authority_by_call = prefer_observations
+          try:
+              for label, source in (
+                  ('safe', safe),
+                  ('unsafe', unsafe),
+                  ('introduced', introduced),
+                  ('final_safe', final_safe),
+                  ('final_danger', final_danger),
+              ):
+                  print(label, 'markers_prefer_observations=', n._r62n_dynamic_execution_markers_from_source(source))
+          finally:
+              n._r62n_observable_authority_by_call = original
+              sys.modules.pop(module_name, None)
+          PY
