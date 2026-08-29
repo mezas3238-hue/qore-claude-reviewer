@@ -27,6 +27,8 @@ jobs:
         run: |
           python - <<'PY'
           import runpy
+          import sys
+          sys.path.insert(0, 'tests/infrastructure')
           ns = runpy.run_path('tests/infrastructure/test_universal_cross_asset_conformance_final_owner_r62n_guards.py')
           scan = ns['_r62n_dynamic_execution_markers_from_source']
           runtime = ns['_runtime_result']
