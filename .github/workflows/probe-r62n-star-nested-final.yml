@@ -1,4 +1,4 @@
-name: Trace R62N scanner environment after TryStar
+name: Probe exact R62N TryStar failed-star paths
 
 on:
   push:
@@ -16,75 +16,82 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: mezas3238-hue/qore-core
-          ref: 35d48570b93473da7bfd4ae0a50073bc253cba76
+          ref: 903c0e2e221f51df705873f90ff9ec18d58101fe
           fetch-depth: 1
           persist-credentials: false
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12.14'
-      - name: Trace scanner state using exact flow successor replacement
+      - name: Falsify exact published candidate
         run: |
           python - <<'PY'
-          import ast
+          import builtins as py_builtins
           import importlib
           import sys
           from pathlib import Path
 
           sys.path.insert(0, str(Path('tests/infrastructure').resolve()))
           n = importlib.import_module('test_universal_cross_asset_conformance_final_owner_r62n_guards')
-          module_name = 'qore_r62n_trystar_downstream_probe'
-          safe = (
-              'b = len\n'
-              'try:\n'
-              '    try:\n'
-              f'        from {module_name} import *\n'
-              '    finally:\n'
-              '        b = lambda _: 3\n'
-              'except* AttributeError:\n'
-              '    pass\n'
-              'result = b("abc")\n'
-          )
-          dangerous = (
-              'b = len\n'
-              'try:\n'
-              f'    from {module_name} import *\n'
-              'except* AttributeError:\n'
-              '    pass\n'
-              'result = b("1+1")\n'
-          )
 
-          class TraceScanner(n._R62NBoundedExceptionalLoopGlobalsScanner):
-              def _scan_statement(self, node: ast.stmt, environment: dict[str, n._Value]) -> None:
-                  if isinstance(node, ast.TryStar):
-                      print('BEFORE_TRYSTAR', environment)
-                      initial = (environment.copy(), {})
-                      completed = n._r62n_process_try(
-                          node,
-                          initial,
-                          top_index=0,
-                          timeline={},
-                          observations={},
-                          precision_lost=[False],
-                      )
-                      normals = [
-                          outcome.state[0]
-                          for outcome in completed
-                          if outcome.kind == 'normal'
-                      ]
-                      print('NORMALS', normals)
-                      environment.clear()
-                      if normals:
-                          self._merge_environments(environment, *normals)
-                      print('AFTER_TRYSTAR', environment)
-                      return
-                  if isinstance(node, ast.Assign) and node.lineno >= 5:
-                      print('BEFORE_ASSIGN', node.lineno, environment)
-                  super()._scan_statement(node, environment)
-                  if isinstance(node, ast.Assign) and node.lineno >= 5:
-                      print('AFTER_ASSIGN', node.lineno, environment)
-
-          for name, source in [('SAFE', safe), ('DANGER', dangerous)]:
-              print('===', name, '===')
-              scanner = TraceScanner()
-              print('markers=', scanner.scan(source))
+          module_name = 'qore_r62n_exact_trystar_probe'
+          module = n._R62NStarImportModule(module_name)
+          module.__all__ = ['b', 'missing']
+          module.b = py_builtins.eval
+          sys.modules[module_name] = module
+          try:
+              specimens = {
+                  'handler_danger': (
+                      'b = len\n'
+                      'try:\n'
+                      f'    from {module_name} import *\n'
+                      'except* AttributeError:\n'
+                      '    result = b("1+1")\n'
+                  ),
+                  'downstream_danger': (
+                      'b = len\n'
+                      'try:\n'
+                      f'    from {module_name} import *\n'
+                      'except* AttributeError:\n'
+                      '    pass\n'
+                      'result = b("1+1")\n'
+                  ),
+                  'handler_safe': (
+                      'b = len\n'
+                      'try:\n'
+                      '    try:\n'
+                      f'        from {module_name} import *\n'
+                      '    finally:\n'
+                      '        b = lambda _: 3\n'
+                      'except* AttributeError:\n'
+                      '    result = b("abc")\n'
+                  ),
+                  'downstream_safe': (
+                      'b = len\n'
+                      'try:\n'
+                      '    try:\n'
+                      f'        from {module_name} import *\n'
+                      '    finally:\n'
+                      '        b = lambda _: 3\n'
+                      'except* AttributeError:\n'
+                      '    pass\n'
+                      'result = b("abc")\n'
+                  ),
+              }
+              expected_runtime = {
+                  'handler_danger': 2,
+                  'downstream_danger': 2,
+                  'handler_safe': 3,
+                  'downstream_safe': 3,
+              }
+              for name, source in specimens.items():
+                  runtime = n._runtime_result(source)
+                  markers = n._r62n_dynamic_execution_markers_from_source(source)
+                  print(f'{name}: runtime={runtime} markers={markers}')
+                  assert runtime == expected_runtime[name]
+                  if name.endswith('_danger'):
+                      assert markers, f'material false negative: {name}'
+              # Safe cases are reported, not weakened into danger expectations.
+              # Their marker shape determines whether a precision repair is justified.
+          finally:
+              sys.modules.pop(module_name, None)
           PY
