@@ -1,4 +1,4 @@
-name: Diagnose R62N TryStar successor flow
+name: Trace R62N scanner environment after TryStar
 
 on:
   push:
@@ -22,7 +22,7 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12.14'
-      - name: Inspect TryStar abstract successor states
+      - name: Trace scanner state using exact flow successor replacement
         run: |
           python - <<'PY'
           import ast
@@ -33,7 +33,7 @@ jobs:
           sys.path.insert(0, str(Path('tests/infrastructure').resolve()))
           n = importlib.import_module('test_universal_cross_asset_conformance_final_owner_r62n_guards')
           module_name = 'qore_r62n_trystar_downstream_probe'
-          source = (
+          safe = (
               'b = len\n'
               'try:\n'
               '    try:\n'
@@ -44,43 +44,47 @@ jobs:
               '    pass\n'
               'result = b("abc")\n'
           )
-          tree = ast.parse(source)
-          try_node = tree.body[1]
-          assert isinstance(try_node, ast.TryStar)
-          initial = (
-              {
-                  '__builtins__': n._r12._BUILTINS_NAMESPACE,
-                  'b': n._UNKNOWN,
-              },
-              {},
+          dangerous = (
+              'b = len\n'
+              'try:\n'
+              f'    from {module_name} import *\n'
+              'except* AttributeError:\n'
+              '    pass\n'
+              'result = b("1+1")\n'
           )
-          timeline = {}
-          observations = {}
-          precision_lost = [False]
-          outcomes = n._r62n_process_try(
-              try_node,
-              initial,
-              top_index=0,
-              timeline=timeline,
-              observations=observations,
-              precision_lost=precision_lost,
-          )
-          print('precision_lost=', precision_lost[0])
-          for index, outcome in enumerate(outcomes):
-              env = outcome.state[0]
-              print(
-                  'OUTCOME', index,
-                  'kind=', outcome.kind,
-                  'b=', env.get('b'),
-                  'star=', env.get(n._R62N_STAR_IMPORT_TAINT),
-                  'exception=', env.get(n._R62N_EXCEPTION_TAG),
-              )
-          obs, full_timeline, full_precision = n._r62n_flow(source)
-          print('FLOW precision=', full_precision)
-          for index, states in sorted(full_timeline.items()):
-              print('TIMELINE', index, [
-                  (state.get('b'), state.get(n._R62N_STAR_IMPORT_TAINT))
-                  for state in states
-              ])
-          print('markers=', n._r62n_dynamic_execution_markers_from_source(source))
+
+          class TraceScanner(n._R62NBoundedExceptionalLoopGlobalsScanner):
+              def _scan_statement(self, node: ast.stmt, environment: dict[str, n._Value]) -> None:
+                  if isinstance(node, ast.TryStar):
+                      print('BEFORE_TRYSTAR', environment)
+                      initial = (environment.copy(), {})
+                      completed = n._r62n_process_try(
+                          node,
+                          initial,
+                          top_index=0,
+                          timeline={},
+                          observations={},
+                          precision_lost=[False],
+                      )
+                      normals = [
+                          outcome.state[0]
+                          for outcome in completed
+                          if outcome.kind == 'normal'
+                      ]
+                      print('NORMALS', normals)
+                      environment.clear()
+                      if normals:
+                          self._merge_environments(environment, *normals)
+                      print('AFTER_TRYSTAR', environment)
+                      return
+                  if isinstance(node, ast.Assign) and node.lineno >= 5:
+                      print('BEFORE_ASSIGN', node.lineno, environment)
+                  super()._scan_statement(node, environment)
+                  if isinstance(node, ast.Assign) and node.lineno >= 5:
+                      print('AFTER_ASSIGN', node.lineno, environment)
+
+          for name, source in [('SAFE', safe), ('DANGER', dangerous)]:
+              print('===', name, '===')
+              scanner = TraceScanner()
+              print('markers=', scanner.scan(source))
           PY
