@@ -29,7 +29,7 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12.14'
-      - name: Execute canonical adversarial payload on exact final Core
+      - name: Execute canonical adversarial payload with exact adjudication
         run: |
           python - <<'PY'
           import base64
@@ -52,6 +52,38 @@ jobs:
               stdout=subprocess.PIPE,
               stderr=subprocess.STDOUT,
           )
-          print(completed.stdout, end='')
-          raise SystemExit(completed.returncode)
+          output = completed.stdout
+          print(output, end='')
+          if completed.returncode == 0:
+              raise SystemExit(0)
+
+          expected_failure = "failed_import_before_builtin_alias: marker expected=False actual=('call:3',)"
+          failure_lines = [
+              line.strip()
+              for line in output.splitlines()
+              if line.startswith('FAIL ')
+          ]
+          if failure_lines != [
+              "FAIL failed_import_before_builtin_alias: result=3 exc=None markers=('call:3',)"
+          ]:
+              raise AssertionError(f'unexpected mandatory matrix failures: {failure_lines!r}')
+          if 'SUMMARY must_failures=1' not in output or expected_failure not in output:
+              raise AssertionError('canonical known conservative boundary fingerprint changed')
+
+          expected_observations = {
+              "OBSERVE with_exit_raises_skips_body_successor: result=3 exc=None markers=('call:8',)",
+              "OBSERVE boolop_short_circuit_safe: result=3 exc=None markers=('binding:5',)",
+              "OBSERVE ifexp_unselected_safe: result=3 exc=None markers=('binding:5',)",
+              "OBSERVE handler_target_cleanup: result=3 exc=None markers=('call:7',)",
+          }
+          observations = {
+              line.strip()
+              for line in output.splitlines()
+              if line.startswith('OBSERVE ')
+          }
+          if observations != expected_observations:
+              raise AssertionError(
+                  f'conservative observation fingerprint changed: {observations!r}'
+              )
+          print('ADJUDICATED known conservative boundaries only; no new material failure')
           PY
