@@ -27,7 +27,8 @@ jobs:
         with:
           python-version: '3.12.14'
       - name: Apply unpublished v2 patch
-        run: python core/.github/patches/r62n_trystar_cross_handler_patch.txt
+        working-directory: core
+        run: python .github/patches/r62n_trystar_cross_handler_patch.txt
       - name: Apply and inspect bounded v3 candidate
         run: python .github/scripts/probe_r62n_trystar_candidate.py
       - name: Install
