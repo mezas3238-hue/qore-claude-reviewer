@@ -24,7 +24,7 @@ def _run(label: str, script: str) -> None:
 _run("historical-current-freeze-payload", _heredoc(".github/workflows/probe-r62n-current-freeze.yml"))
 _run("historical-star-nested-final-payload", _heredoc(".github/workflows/probe-r62n-star-nested-final.yml"))
 
-fresh = r'''
+fresh = r"""
 import importlib
 import sys
 from pathlib import Path
@@ -79,5 +79,5 @@ except* ValueError:
 finally:
     result = b("1+1")
 ''', 2, 9, True)
-'''
+"""
 _run("fresh-static-sequencing-inversions", fresh)
