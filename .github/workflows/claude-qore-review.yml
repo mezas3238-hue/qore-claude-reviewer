@@ -469,10 +469,13 @@ jobs:
               raise SystemExit("Claude mechanical failure: empty final result")
           clean = "HALLAZGOS: NINGUNO" in result and "VALIDACIÓN OK" in result
           not_ok = "VALIDACIÓN NO OK" in result
-          if clean == not_ok:
+          mechanical = "MECHANICAL REVIEW FAILURE" in result
+          if sum((clean, not_ok, mechanical)) != 1:
               raise SystemExit("Claude mechanical failure: ambiguous or missing final verdict contract")
           pathlib.Path(sys.argv[2]).write_text(result + "\n", encoding="utf-8")
           print("Claude final report extracted successfully.")
+          if mechanical:
+              raise SystemExit("Claude reported MECHANICAL REVIEW FAILURE")
           PY
 
       - name: Verify reviewer remained read-only and frozen HEAD is unchanged
