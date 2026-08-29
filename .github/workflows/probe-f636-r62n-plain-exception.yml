@@ -12,13 +12,25 @@ jobs:
   probe:
     runs-on: ubuntu-24.04
     steps:
+      - name: Create QORE Claude Reviewer installation token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.QORE_CLAUDE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.QORE_CLAUDE_APP_PRIVATE_KEY }}
+          owner: mezas3238-hue
+          repositories: qore-core
+          permission-contents: read
+          permission-pull-requests: read
+
       - name: Checkout exact Core candidate
         uses: actions/checkout@v4
         with:
           repository: mezas3238-hue/qore-core
-          ref: f636e23d0aa185f90eaab41993aecae19815e37e
-          token: ${{ secrets.QORE_CORE_REVIEW_TOKEN }}
+          ref: 1ef22b1796576166840481aa14f865a1212b8c09
+          token: ${{ steps.app-token.outputs.token }}
           path: qore-core
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -42,40 +54,35 @@ jobs:
           assert spec is not None and spec.loader is not None
           mod = importlib.util.module_from_spec(spec)
           spec.loader.exec_module(mod)
-
           runtime = mod._runtime_result
           markers = mod._r62n_dynamic_execution_markers_from_source
 
           def calls(source: str) -> tuple[str, ...]:
               return tuple(m for m in markers(source) if m.startswith("call:"))
 
-          cases: list[tuple[str, str, int, bool]] = [
-              ("claude-f1-danger", '''b = eval\ntry:\n    try:\n        raise ValueError("v")\n    except* TypeError:\n        pass\nexcept ValueError:\n    result = b("1+1")\n''', 2, True),
-              ("claude-f1-safe", '''b = len\ntry:\n    try:\n        raise ValueError("v")\n    except* TypeError:\n        pass\nexcept ValueError:\n    result = b("abc")\n''', 3, False),
-              ("plain-match-safe", '''b = eval\ntry:\n    raise ValueError("v")\nexcept* ValueError:\n    b = len\nresult = b("abc")\n''', 3, False),
-              ("plain-match-danger", '''b = len\ntry:\n    raise ValueError("v")\nexcept* ValueError:\n    b = eval\nresult = b("1+1")\n''', 2, True),
-              ("plain-bare-reraise-safe", '''b = eval\ntry:\n    try:\n        raise ValueError("v")\n    except* ValueError:\n        b = len\n        raise\nexcept ExceptionGroup:\n    result = b("abc")\n''', 3, False),
-              ("plain-bare-reraise-danger", '''b = len\ntry:\n    try:\n        raise ValueError("v")\n    except* ValueError:\n        b = eval\n        raise\nexcept ExceptionGroup:\n    result = b("1+1")\n''', 2, True),
-              ("new-exception-not-caught-sibling", '''b = len\ntry:\n    try:\n        raise ExceptionGroup("eg", [AttributeError("a")])\n    except* AttributeError:\n        b = eval\n        raise ValueError("new")\n    except* ValueError:\n        b = len\nexcept ValueError:\n    result = b("1+1")\n''', 2, True),
-              ("later-subgroup-repairs-before-new-propagates", '''b = len\ntry:\n    try:\n        raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])\n    except* AttributeError:\n        b = eval\n        raise TypeError("new")\n    except* ValueError:\n        b = len\nexcept TypeError:\n    result = b("abc")\n''', 3, False),
-              ("unmatched-remainder-danger", '''b = len\ntry:\n    try:\n        raise ExceptionGroup("eg", [AttributeError("a"), KeyError("k")])\n    except* AttributeError:\n        b = eval\nexcept ExceptionGroup:\n    result = b("1+1")\n''', 2, True),
-              ("unmatched-remainder-safe", '''b = eval\ntry:\n    try:\n        raise ExceptionGroup("eg", [AttributeError("a"), KeyError("k")])\n    except* AttributeError:\n        b = len\nexcept ExceptionGroup:\n    result = b("abc")\n''', 3, False),
-              ("bare-reraise-plus-new-safe", '''b = eval\ntry:\n    try:\n        raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])\n    except* AttributeError:\n        b = eval\n        raise\n    except* ValueError:\n        b = len\n        raise TypeError("new")\nexcept ExceptionGroup:\n    result = b("abc")\n''', 3, False),
-              ("bare-reraise-plus-new-danger", '''b = len\ntry:\n    try:\n        raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])\n    except* AttributeError:\n        b = len\n        raise\n    except* ValueError:\n        b = eval\n        raise TypeError("new")\nexcept ExceptionGroup:\n    result = b("1+1")\n''', 2, True),
-              ("finally-safe", '''b = eval\ntry:\n    raise ValueError("v")\nexcept* ValueError:\n    b = len\nfinally:\n    result = b("abc")\n''', 3, False),
-              ("finally-danger", '''b = len\ntry:\n    raise ValueError("v")\nexcept* ValueError:\n    b = eval\nfinally:\n    result = b("1+1")\n''', 2, True),
-              ("three-handler-safe", '''b = eval\ntry:\n    raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v"), TypeError("t")])\nexcept* AttributeError:\n    b = eval\nexcept* ValueError:\n    b = eval\nexcept* TypeError:\n    b = len\nresult = b("abc")\n''', 3, False),
-              ("three-handler-danger", '''b = len\ntry:\n    raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v"), TypeError("t")])\nexcept* AttributeError:\n    b = len\nexcept* ValueError:\n    b = len\nexcept* TypeError:\n    b = eval\nresult = b("1+1")\n''', 2, True),
+          cases = [
+              ("claude-f1-danger", 'b = eval\ntry:\n    try:\n        raise ValueError("v")\n    except* TypeError:\n        pass\nexcept ValueError:\n    result = b("1+1")\n', 2, True),
+              ("claude-f1-safe", 'b = len\ntry:\n    try:\n        raise ValueError("v")\n    except* TypeError:\n        pass\nexcept ValueError:\n    result = b("abc")\n', 3, False),
+              ("plain-match-safe", 'b = eval\ntry:\n    raise ValueError("v")\nexcept* ValueError:\n    b = len\nresult = b("abc")\n', 3, False),
+              ("plain-match-danger", 'b = len\ntry:\n    raise ValueError("v")\nexcept* ValueError:\n    b = eval\nresult = b("1+1")\n', 2, True),
+              ("plain-bare-reraise-safe", 'b = eval\ntry:\n    try:\n        raise ValueError("v")\n    except* ValueError:\n        b = len\n        raise\nexcept ExceptionGroup:\n    result = b("abc")\n', 3, False),
+              ("plain-bare-reraise-danger", 'b = len\ntry:\n    try:\n        raise ValueError("v")\n    except* ValueError:\n        b = eval\n        raise\nexcept ExceptionGroup:\n    result = b("1+1")\n', 2, True),
+              ("new-exception-not-caught-sibling", 'b = len\ntry:\n    try:\n        raise ExceptionGroup("eg", [AttributeError("a")])\n    except* AttributeError:\n        b = eval\n        raise ValueError("new")\n    except* ValueError:\n        b = len\nexcept ValueError:\n    result = b("1+1")\n', 2, True),
+              ("later-subgroup-repairs", 'b = len\ntry:\n    try:\n        raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])\n    except* AttributeError:\n        b = eval\n        raise TypeError("new")\n    except* ValueError:\n        b = len\nexcept TypeError:\n    result = b("abc")\n', 3, False),
+              ("unmatched-remainder-danger", 'b = len\ntry:\n    try:\n        raise ExceptionGroup("eg", [AttributeError("a"), KeyError("k")])\n    except* AttributeError:\n        b = eval\nexcept ExceptionGroup:\n    result = b("1+1")\n', 2, True),
+              ("unmatched-remainder-safe", 'b = eval\ntry:\n    try:\n        raise ExceptionGroup("eg", [AttributeError("a"), KeyError("k")])\n    except* AttributeError:\n        b = len\nexcept ExceptionGroup:\n    result = b("abc")\n', 3, False),
+              ("bare-reraise-plus-new-safe", 'b = eval\ntry:\n    try:\n        raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])\n    except* AttributeError:\n        b = eval\n        raise\n    except* ValueError:\n        b = len\n        raise TypeError("new")\nexcept ExceptionGroup:\n    result = b("abc")\n', 3, False),
+              ("bare-reraise-plus-new-danger", 'b = len\ntry:\n    try:\n        raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])\n    except* AttributeError:\n        b = len\n        raise\n    except* ValueError:\n        b = eval\n        raise TypeError("new")\nexcept ExceptionGroup:\n    result = b("1+1")\n', 2, True),
+              ("finally-safe", 'b = eval\ntry:\n    raise ValueError("v")\nexcept* ValueError:\n    b = len\nfinally:\n    result = b("abc")\n', 3, False),
+              ("finally-danger", 'b = len\ntry:\n    raise ValueError("v")\nexcept* ValueError:\n    b = eval\nfinally:\n    result = b("1+1")\n', 2, True),
+              ("three-handler-safe", 'b = eval\ntry:\n    raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v"), TypeError("t")])\nexcept* AttributeError:\n    b = eval\nexcept* ValueError:\n    b = eval\nexcept* TypeError:\n    b = len\nresult = b("abc")\n', 3, False),
+              ("three-handler-danger", 'b = len\ntry:\n    raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v"), TypeError("t")])\nexcept* AttributeError:\n    b = len\nexcept* ValueError:\n    b = len\nexcept* TypeError:\n    b = eval\nresult = b("1+1")\n', 2, True),
           ]
-
           for name, source, expected, dangerous in cases:
               got = runtime(source)
               found = calls(source)
               print(name, "runtime=", got, "calls=", found)
               assert got == expected, (name, got, expected)
-              if dangerous:
-                  assert found, (name, "material false negative")
-              else:
-                  assert not found, (name, "material false positive", found)
+              assert bool(found) is dangerous, (name, "marker mismatch", found)
           print(f"ADVERSARIAL MATRIX PASS: {len(cases)}/{len(cases)}")
           PY
