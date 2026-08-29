@@ -126,7 +126,10 @@ jobs:
           python3 - <<'PY'
           from __future__ import annotations
 
+          import contextlib
+          import hashlib
           import importlib
+          import io
           import os
           import subprocess
           import sys
@@ -167,13 +170,30 @@ jobs:
               return fn(source)  # type: ignore[operator]
 
           def runtime(source: str) -> str:
+              """Execute as an imported-module-like namespace (__builtins__ is a dict)."""
               namespace: dict[str, object] = {}
               try:
                   code = compile(source, "<qore-claude-probe>", "exec", dont_inherit=True)
-                  exec(code, namespace)
+                  with contextlib.redirect_stdout(io.StringIO()):
+                      exec(code, namespace)
               except Exception as exc:
                   return f"EXCEPTION {type(exc).__name__} args={exc.args!r}"
               return repr(namespace.get("result"))
+
+          def runtime_main(source: str) -> str:
+              """Execute exact source as CPython __main__ via -c (__builtins__ is a module)."""
+              completed = subprocess.run(
+                  [sys.executable, "-I", "-B", "-c", source],
+                  cwd=root,
+                  text=True,
+                  stdout=subprocess.PIPE,
+                  stderr=subprocess.PIPE,
+                  check=False,
+              )
+              if completed.returncode:
+                  last = completed.stderr.strip().splitlines()[-1]
+                  return f"EXCEPTION {last}"
+              return completed.stdout.strip()
 
           namedexpr = """\
           import builtins
@@ -214,6 +234,31 @@ jobs:
           """
           module_vars = 'import builtins\nresult = vars()["builtins"].eval("1+1")\n'
 
+          r62g_module_subscript_safe = (
+              'import builtins\n'
+              'result = builtins["eval"]("1+1")\n'
+              'print(result)\n'
+          )
+          r62g_builtins_dict_dangerous = (
+              'import builtins\n'
+              'result = builtins.__dict__["eval"]("1+1")\n'
+              'print(result)\n'
+          )
+          r62g_explicit_mapping_dangerous = (
+              '__builtins__ = {"eval": eval}\n'
+              'result = __builtins__["eval"]("1+1")\n'
+              'print(result)\n'
+          )
+          r62g_dunder_context_sensitive = (
+              'result = globals()["__builtins__"]["eval"]("1+1")\n'
+              'print(result)\n'
+          )
+          r62g_imported_dict_context_sensitive = (
+              'from builtins import __dict__ as namespace\n'
+              'result = namespace["globals"]()["__builtins__"]["eval"]("1+1")\n'
+              'print(result)\n'
+          )
+
           matrix = {
               "namedexpr_same_statement": {
                   "runtime": runtime(namedexpr),
@@ -244,6 +289,36 @@ jobs:
                   "r62g": scan("r62g", module_vars),
                   "r62k": scan("r62k", module_vars),
               },
+              "r62g_explicit_module_subscript_safe": {
+                  "source_sha256": hashlib.sha256(r62g_module_subscript_safe.encode()).hexdigest(),
+                  "runtime_main": runtime_main(r62g_module_subscript_safe),
+                  "runtime_imported": runtime(r62g_module_subscript_safe),
+                  "r62g": scan("r62g", r62g_module_subscript_safe),
+              },
+              "r62g_builtins_dict_dangerous": {
+                  "source_sha256": hashlib.sha256(r62g_builtins_dict_dangerous.encode()).hexdigest(),
+                  "runtime_main": runtime_main(r62g_builtins_dict_dangerous),
+                  "runtime_imported": runtime(r62g_builtins_dict_dangerous),
+                  "r62g": scan("r62g", r62g_builtins_dict_dangerous),
+              },
+              "r62g_explicit_mapping_dangerous": {
+                  "source_sha256": hashlib.sha256(r62g_explicit_mapping_dangerous.encode()).hexdigest(),
+                  "runtime_main": runtime_main(r62g_explicit_mapping_dangerous),
+                  "runtime_imported": runtime(r62g_explicit_mapping_dangerous),
+                  "r62g": scan("r62g", r62g_explicit_mapping_dangerous),
+              },
+              "r62g_dunder_context_sensitive": {
+                  "source_sha256": hashlib.sha256(r62g_dunder_context_sensitive.encode()).hexdigest(),
+                  "runtime_main": runtime_main(r62g_dunder_context_sensitive),
+                  "runtime_imported": runtime(r62g_dunder_context_sensitive),
+                  "r62g": scan("r62g", r62g_dunder_context_sensitive),
+              },
+              "r62g_imported_dict_context_sensitive": {
+                  "source_sha256": hashlib.sha256(r62g_imported_dict_context_sensitive.encode()).hexdigest(),
+                  "runtime_main": runtime_main(r62g_imported_dict_context_sensitive),
+                  "runtime_imported": runtime(r62g_imported_dict_context_sensitive),
+                  "r62g": scan("r62g", r62g_imported_dict_context_sensitive),
+              },
           }
 
           assert matrix["namedexpr_same_statement"]["runtime"] == "2"
@@ -262,6 +337,23 @@ jobs:
           assert matrix["nested_retained_default"]["r62k"]
           assert matrix["module_vars_dangerous"]["runtime"] == "2"
           assert matrix["module_vars_dangerous"]["r62k"]
+
+          safe_r62g = matrix["r62g_explicit_module_subscript_safe"]
+          assert "TypeError" in safe_r62g["runtime_main"]
+          assert "TypeError" in safe_r62g["runtime_imported"]
+          assert safe_r62g["r62g"] == ()
+
+          for label in ("r62g_builtins_dict_dangerous", "r62g_explicit_mapping_dangerous"):
+              evidence = matrix[label]
+              assert evidence["runtime_main"] == "2"
+              assert evidence["runtime_imported"] == "2"
+              assert any(marker.startswith("call:") for marker in evidence["r62g"])
+
+          for label in ("r62g_dunder_context_sensitive", "r62g_imported_dict_context_sensitive"):
+              evidence = matrix[label]
+              assert "TypeError" in evidence["runtime_main"]
+              assert evidence["runtime_imported"] == "2"
+              assert any(marker.startswith("call:") for marker in evidence["r62g"])
 
           def git(*args: str) -> str:
               return subprocess.check_output(["git", *args], cwd=root, text=True).strip()
@@ -284,6 +376,10 @@ jobs:
               "",
               "## Mandatory runtime/scanner matrix",
               "",
+              "- `runtime_main`: exact CPython `python -I -B -c` (`__main__.__builtins__` is a module).",
+              "- `runtime` / `runtime_imported`: `exec` into a fresh globals mapping (imported-module-like `__builtins__` dict).",
+              "- R62G source SHA-256 values bind runtime and scanner evidence to identical bytes.",
+              "",
           ]
           for label, evidence in matrix.items():
               lines.append(f"### {label}")
@@ -299,7 +395,7 @@ jobs:
               "```",
               "",
               "Quality Gate evidence bound by Integration Authority before this run:",
-              "QORE CI #1653; CPython 3.12.14; Ruff clean; Mypy 737 source files; 4806 passed; 6 pre-existing warnings; coverage 47568/6234 = 87%.",
+              "QORE CI run 33260165867 / job 99120615940; synthetic 871def531b0f1222e6a1e61252af700f4ed204e3; CPython 3.12.14; Ruff clean; Mypy 740 source files; 4862 passed; 7 warnings; TOTAL coverage 87%.",
               "Treat this QG sentence as supplied evidence; use the checkout and mandatory probes to falsify semantic claims independently.",
           ])
           output.write_text("\n".join(lines) + "\n", encoding="utf-8")
