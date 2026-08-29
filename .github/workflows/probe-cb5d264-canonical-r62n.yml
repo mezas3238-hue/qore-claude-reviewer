@@ -1,0 +1,48 @@
+name: Probe cb5d264 with canonical R62N payload
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/probe-cb5d264-canonical-r62n.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: mezas3238-hue/qore-claude-reviewer
+          ref: main
+          path: reviewer
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: mezas3238-hue/qore-core
+          ref: cb5d264dac42f2bf3b6f12acb8da070efd7c8191
+          path: core
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12.14'
+      - name: Verify exact HEAD and execute canonical payload byte-identically
+        working-directory: core
+        run: |
+          test "$(git rev-parse HEAD)" = "cb5d264dac42f2bf3b6f12acb8da070efd7c8191"
+          python - <<'PY'
+          import base64
+          import re
+          import zlib
+          from pathlib import Path
+
+          workflow = Path("../reviewer/.github/workflows/adjudicate-c2-controlflow.yml").read_text()
+          match = re.search(r"PROBE_ZLIB_B64: '([^']+)'", workflow)
+          if match is None:
+              raise SystemExit("canonical PROBE_ZLIB_B64 not found")
+          script = zlib.decompress(base64.b64decode(match.group(1))).decode("utf-8")
+          exec(compile(script, "<r62n-freeze-probe>", "exec"))
+          PY
