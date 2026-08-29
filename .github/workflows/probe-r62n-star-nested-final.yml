@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: mezas3238-hue/qore-core
-          ref: e87778368efc8887b50c1be94bae7381842ac3a6
+          ref: 35d48570b93473da7bfd4ae0a50073bc253cba76
           fetch-depth: 1
           persist-credentials: false
       - uses: actions/setup-python@v6
@@ -38,16 +38,62 @@ jobs:
           module.__all__ = ['b', 'missing']
           module.b = builtins.eval
           sys.modules[module_name] = module
-          cases = {
-              'outer_handler_danger': 'b = len\ntry:\n    try:\n        from ' + module_name + ' import *\n    finally:\n        marker = 1\nexcept AttributeError:\n    result = b("1+1")\n',
-              'downstream_danger': 'b = len\ntry:\n    try:\n        from ' + module_name + ' import *\n    finally:\n        marker = 1\nexcept AttributeError:\n    pass\nresult = b("1+1")\n',
-              'finally_danger_before_safe_rebind': 'b = len\ntry:\n    from ' + module_name + ' import *\nexcept AttributeError:\n    pass\nfinally:\n    result = b("1+1")\n    b = len\n',
-              'handler_rebind_safe': 'b = len\ntry:\n    from ' + module_name + ' import *\nexcept AttributeError:\n    b = len\nresult = b("abc")\n',
-              'nested_finally_rebind_safe': 'b = len\ntry:\n    try:\n        from ' + module_name + ' import *\n    finally:\n        b = len\nexcept AttributeError:\n    result = b("abc")\n',
+
+          cases: dict[str, tuple[str, int, bool]] = {
+              'outer_handler_danger': (
+                  'b = len\ntry:\n    try:\n        from ' + module_name + ' import *\n    finally:\n        marker = 1\nexcept AttributeError:\n    result = b("1+1")\n',
+                  2,
+                  True,
+              ),
+              'downstream_danger': (
+                  'b = len\ntry:\n    try:\n        from ' + module_name + ' import *\n    finally:\n        marker = 1\nexcept AttributeError:\n    pass\nresult = b("1+1")\n',
+                  2,
+                  True,
+              ),
+              'finally_danger_before_safe_rebind': (
+                  'b = len\ntry:\n    from ' + module_name + ' import *\nexcept AttributeError:\n    pass\nfinally:\n    result = b("1+1")\n    b = lambda _: 3\n',
+                  2,
+                  True,
+              ),
+              'handler_proven_safe_rebind': (
+                  'b = len\ntry:\n    from ' + module_name + ' import *\nexcept AttributeError:\n    b = lambda _: 3\nresult = b("abc")\n',
+                  3,
+                  False,
+              ),
+              'nested_finally_proven_safe_rebind': (
+                  'b = len\ntry:\n    try:\n        from ' + module_name + ' import *\n    finally:\n        b = lambda _: 3\nexcept AttributeError:\n    result = b("abc")\n',
+                  3,
+                  False,
+              ),
+              'nested_if_star_outer_handler': (
+                  'b = len\ntry:\n    if True:\n        from ' + module_name + ' import *\nexcept AttributeError:\n    result = b("1+1")\n',
+                  2,
+                  True,
+              ),
+              'nested_for_star_outer_handler': (
+                  'b = len\ntry:\n    for _ in (0,):\n        from ' + module_name + ' import *\nexcept AttributeError:\n    result = b("1+1")\n',
+                  2,
+                  True,
+              ),
+              'handler_order_preserves_danger': (
+                  'b = len\ntry:\n    try:\n        from ' + module_name + ' import *\n    finally:\n        marker = 1\nexcept KeyError:\n    b = lambda _: 3\nexcept AttributeError:\n    result = b("1+1")\n',
+                  2,
+                  True,
+              ),
           }
-          for name, source in cases.items():
-              ns: dict[str, object] = {}
-              exec(compile(source, f'<{name}>', 'exec', dont_inherit=True), ns)
-              markers = n._r62n_dynamic_execution_markers_from_source(source)
-              print(name, 'runtime=', ns.get('result'), 'markers=', markers)
+
+          try:
+              for name, (source, expected_runtime, expect_marker) in cases.items():
+                  ns: dict[str, object] = {}
+                  exec(compile(source, f'<{name}>', 'exec', dont_inherit=True), ns)
+                  markers = n._r62n_dynamic_execution_markers_from_source(source)
+                  runtime = ns.get('result')
+                  print(name, 'runtime=', runtime, 'markers=', markers)
+                  assert runtime == expected_runtime, (name, runtime, expected_runtime)
+                  if expect_marker:
+                      assert markers, f'material FN: {name}'
+                  else:
+                      assert markers == (), f'unexpected FP on provably safe path {name}: {markers}'
+          finally:
+              sys.modules.pop(module_name, None)
           PY
