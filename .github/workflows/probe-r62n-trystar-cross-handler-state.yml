@@ -27,26 +27,23 @@ jobs:
         run: python .github/patches/r62n_trystar_cross_handler_patch.txt
       - name: Install
         run: pip install -e '.[dev]'
-      - name: Diagnose precision fallback and finalbody sequencing
+      - name: Trace scanner paths for false positives
         run: |
           python - <<'PY'
+          import ast
           import builtins
           import importlib
           import sys
+          import traceback
           from pathlib import Path
 
           sys.path.insert(0, str(Path('tests/infrastructure').resolve()))
           n = importlib.import_module('test_universal_cross_asset_conformance_final_owner_r62n_guards')
-          module_name = 'qore_r62n_precision_probe'
+          module_name = 'qore_r62n_trace_probe'
           module = n._R62NStarImportModule(module_name)
           module.__all__ = ['b', 'missing']
           module.b = builtins.eval
           sys.modules[module_name] = module
-
-          def execute(source: str) -> object:
-              namespace: dict[str, object] = {}
-              exec(compile(source, '<probe>', 'exec', dont_inherit=True), namespace)
-              return namespace.get('result')
 
           safe = f'''\
           b = len
@@ -57,27 +54,6 @@ jobs:
                   raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])
           except* AttributeError:
               b = lambda _: 3
-          except* ValueError:
-              result = b("1+1")
-          '''
-          unsafe = f'''\
-          b = len
-          try:
-              try:
-                  from {module_name} import *
-              except AttributeError:
-                  raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])
-          except* AttributeError:
-              pass
-          except* ValueError:
-              result = b("1+1")
-          '''
-          introduced = '''\
-          b = len
-          try:
-              raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])
-          except* AttributeError:
-              b = eval
           except* ValueError:
               result = b("1+1")
           '''
@@ -92,74 +68,19 @@ jobs:
           finally:
               result = b("1+1")
           '''
-          final_danger = '''\
-          b = len
+
+          class TracingScanner(n._R62NBoundedExceptionalLoopGlobalsScanner):
+              def _evaluate_call(self, node: ast.Call, environment):
+                  if node.lineno >= 5:
+                      print('TRACE_CALL line=', node.lineno, 'func=', ast.unparse(node.func), 'b=', environment.get('b'), 'taint=', environment.get(n._R62N_STAR_IMPORT_TAINT))
+                      traceback.print_stack(limit=10)
+                  return super()._evaluate_call(node, environment)
+
           try:
-              raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])
-          except* AttributeError:
-              b = lambda _: 3
-          except* ValueError:
-              b = eval
+              print('=== SAFE ===')
+              print('markers=', TracingScanner().scan(safe))
+              print('=== FINAL_SAFE ===')
+              print('markers=', TracingScanner().scan(final_safe))
           finally:
-              result = b("1+1")
-          '''
-
-          def dump(label: str, source: str) -> None:
-              observations, timeline, precision_lost = n._r62n_flow(source)
-              fallback = n._r62n_future_authority_by_call(source, timeline)
-              owner_by_call = n._r62k._r62k_top_level_owner_calls(source)
-              escaped = n._r62k._r62k_escaped_owners(source)
-              print(label, 'runtime=', execute(source), 'precision_lost=', precision_lost)
-              for position in n._r62j._r62j_deferred_call_top_indexes(source):
-                  owner = owner_by_call.get(position)
-                  states = observations.get(owner) if owner is not None else None
-                  authority = n._r62k._r62k_authority_from_states(states) if states else None
-                  print(label, 'position=', position, 'owner=', owner, 'escaped=', owner in escaped if owner else None)
-                  print(label, 'observation_authority=', authority)
-                  print(label, 'fallback=', fallback.get(position))
-              print(label, 'markers_current=', n._r62n_dynamic_execution_markers_from_source(source))
-
-          for label, source in (
-              ('safe', safe),
-              ('unsafe', unsafe),
-              ('introduced', introduced),
-              ('final_safe', final_safe),
-              ('final_danger', final_danger),
-          ):
-              dump(label, source)
-
-          original = n._r62n_observable_authority_by_call
-          def prefer_observations(source: str):
-              observations, timeline, precision_lost = n._r62n_flow(source)
-              fallback = n._r62n_future_authority_by_call(source, timeline)
-              owner_by_call = n._r62k._r62k_top_level_owner_calls(source)
-              escaped = n._r62k._r62k_escaped_owners(source)
-              result = {}
-              for position in n._r62j._r62j_deferred_call_top_indexes(source):
-                  owner = owner_by_call.get(position)
-                  if owner is not None and owner not in escaped:
-                      states = observations.get(owner)
-                      if states:
-                          authority = n._r62k._r62k_authority_from_states(states)
-                          if authority:
-                              result[position] = authority
-                          continue
-                  future = fallback.get(position)
-                  if future:
-                      result[position] = future
-              return result
-
-          n._r62n_observable_authority_by_call = prefer_observations
-          try:
-              for label, source in (
-                  ('safe', safe),
-                  ('unsafe', unsafe),
-                  ('introduced', introduced),
-                  ('final_safe', final_safe),
-                  ('final_danger', final_danger),
-              ):
-                  print(label, 'markers_prefer_observations=', n._r62n_dynamic_execution_markers_from_source(source))
-          finally:
-              n._r62n_observable_authority_by_call = original
               sys.modules.pop(module_name, None)
           PY
