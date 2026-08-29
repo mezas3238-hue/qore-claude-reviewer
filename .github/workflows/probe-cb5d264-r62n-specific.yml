@@ -1,0 +1,56 @@
+name: Probe cb5d264 with existing R62N specific payloads
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/probe-cb5d264-r62n-specific.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: mezas3238-hue/qore-claude-reviewer
+          ref: main
+          path: reviewer
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: mezas3238-hue/qore-core
+          ref: cb5d264dac42f2bf3b6f12acb8da070efd7c8191
+          path: core
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12.14'
+      - name: Verify exact HEAD and execute existing payloads
+        working-directory: core
+        run: |
+          test "$(git rev-parse HEAD)" = "cb5d264dac42f2bf3b6f12acb8da070efd7c8191"
+          python - <<'PY'
+          from pathlib import Path
+
+          def payload(path: str) -> str:
+              lines = Path(path).read_text().splitlines()
+              start = next(i for i, line in enumerate(lines) if line.strip() == "python - <<'PY'") + 1
+              end = next(i for i in range(start, len(lines)) if lines[i].strip() == "PY")
+              body = lines[start:end]
+              prefix = "          "
+              if any(line and not line.startswith(prefix) for line in body):
+                  raise AssertionError(f"unexpected payload indentation in {path}")
+              return "\n".join(line[len(prefix):] if line else "" for line in body) + "\n"
+
+          for workflow in (
+              "../reviewer/.github/workflows/probe-r62n-current-freeze.yml",
+              "../reviewer/.github/workflows/probe-r62n-star-nested-final.yml",
+          ):
+              print(f"=== executing existing payload: {workflow} ===")
+              script = payload(workflow)
+              exec(compile(script, workflow, "exec"), {"__name__": "__main__"})
+          PY
