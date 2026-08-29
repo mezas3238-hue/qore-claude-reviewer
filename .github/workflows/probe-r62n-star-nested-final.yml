@@ -33,7 +33,6 @@ jobs:
 
           sys.path.insert(0, str(Path('tests/infrastructure').resolve()))
           n = importlib.import_module('test_universal_cross_asset_conformance_final_owner_r62n_guards')
-
           module_name = 'qore_r62n_nested_star_probe'
           module = types.ModuleType(module_name)
           module.__all__ = ['b', 'missing']
@@ -41,44 +40,10 @@ jobs:
           sys.modules[module_name] = module
 
           cases = {
-              'outer_handler_danger': f'''\
-b = len
-try:
-    try:
-        from {module_name} import *
-    finally:
-        marker = 1
-except AttributeError:
-    result = b("1+1")
-''',
-              'finally_danger_before_safe_rebind': f'''\
-b = len
-try:
-    from {module_name} import *
-except AttributeError:
-    pass
-finally:
-    result = b("1+1")
-    b = len
-''',
-              'handler_rebind_safe': f'''\
-b = len
-try:
-    from {module_name} import *
-except AttributeError:
-    b = len
-result = b("abc")
-''',
-              'finally_rebind_safe': f'''\
-b = len
-try:
-    from {module_name} import *
-except AttributeError:
-    pass
-finally:
-    b = len
-result = b("abc")
-''',
+              'outer_handler_danger': 'b = len\ntry:\n    try:\n        from ' + module_name + ' import *\n    finally:\n        marker = 1\nexcept AttributeError:\n    result = b("1+1")\n',
+              'finally_danger_before_safe_rebind': 'b = len\ntry:\n    from ' + module_name + ' import *\nexcept AttributeError:\n    pass\nfinally:\n    result = b("1+1")\n    b = len\n',
+              'handler_rebind_safe': 'b = len\ntry:\n    from ' + module_name + ' import *\nexcept AttributeError:\n    b = len\nresult = b("abc")\n',
+              'finally_rebind_safe': 'b = len\ntry:\n    from ' + module_name + ' import *\nexcept AttributeError:\n    pass\nfinally:\n    b = len\nresult = b("abc")\n',
           }
           dangerous = {'outer_handler_danger', 'finally_danger_before_safe_rebind'}
           for name, source in cases.items():
