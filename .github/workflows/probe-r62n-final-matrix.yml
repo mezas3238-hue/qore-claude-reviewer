@@ -1,0 +1,58 @@
+name: Probe R62N final adversarial matrix
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/probe-r62n-final-matrix.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout reviewer payload
+        uses: actions/checkout@v4
+        with:
+          path: reviewer
+          persist-credentials: false
+      - name: Checkout exact Core candidate
+        uses: actions/checkout@v4
+        with:
+          repository: mezas3238-hue/qore-core
+          ref: e87778368efc8887b50c1be94bae7381842ac3a6
+          path: core
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12.14'
+      - name: Execute canonical adversarial payload on exact final Core
+        run: |
+          python - <<'PY'
+          import base64
+          import os
+          import re
+          import subprocess
+          import sys
+          import zlib
+          from pathlib import Path
+
+          workflow = Path('reviewer/.github/workflows/adjudicate-c2-controlflow.yml').read_text()
+          match = re.search(r"PROBE_ZLIB_B64: '([^']+)'", workflow)
+          if match is None:
+              raise SystemExit('canonical adversarial payload not found')
+          script = zlib.decompress(base64.b64decode(match.group(1))).decode('utf-8')
+          Path('/tmp/r62n-final-matrix.py').write_text(script)
+          completed = subprocess.run(
+              [sys.executable, '/tmp/r62n-final-matrix.py'],
+              cwd='core',
+              text=True,
+              stdout=subprocess.PIPE,
+              stderr=subprocess.STDOUT,
+          )
+          print(completed.stdout, end='')
+          raise SystemExit(completed.returncode)
+          PY
