@@ -3,7 +3,9 @@ name: Probe R62N clean 751979b
 on:
   push:
     branches: [main]
-    paths: [.github/workflows/probe-r62n-clean-751979b.yml]
+    paths:
+      - .github/workflows/probe-r62n-clean-751979b.yml
+      - .github/scripts/probe_r62n_clean_751979b.py
 
 permissions:
   contents: read
