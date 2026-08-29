@@ -1,0 +1,96 @@
+name: Probe R62N TryStar cross-handler state
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/probe-r62n-trystar-cross-handler-state.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact Core freeze
+        uses: actions/checkout@v4
+        with:
+          repository: mezas3238-hue/qore-core
+          ref: cb5d264dac42f2bf3b6f12acb8da070efd7c8191
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12.14'
+      - name: Reproduce cross-handler state semantics
+        run: |
+          python - <<'PY'
+          import builtins
+          import importlib
+          import sys
+          import types
+          from pathlib import Path
+
+          sys.path.insert(0, str(Path('tests/infrastructure').resolve()))
+          n = importlib.import_module('test_universal_cross_asset_conformance_final_owner_r62n_guards')
+          module_name = 'qore_r62n_cross_handler_probe'
+
+          def install() -> None:
+              module = types.ModuleType(module_name)
+              module.__all__ = ['b', 'missing']
+              module.b = builtins.eval
+              sys.modules[module_name] = module
+
+          def execute(name: str, source: str, expected: int) -> tuple[str, ...]:
+              namespace: dict[str, object] = {}
+              exec(compile(source, f'<{name}>', 'exec', dont_inherit=True), namespace)
+              markers = n._r62n_dynamic_execution_markers_from_source(source)
+              print(name, 'runtime=', namespace.get('result'), 'markers=', markers)
+              assert namespace.get('result') == expected
+              return markers
+
+          try:
+              install()
+              safe_rebind = f'''\
+b = len
+try:
+    try:
+        from {module_name} import *
+    except AttributeError:
+        raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])
+except* AttributeError:
+    b = lambda _: 3
+except* ValueError:
+    result = b("1+1")
+'''
+              unsafe_control = f'''\
+b = len
+try:
+    try:
+        from {module_name} import *
+    except AttributeError:
+        raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])
+except* AttributeError:
+    pass
+except* ValueError:
+    result = b("1+1")
+'''
+              introduced_danger = '''\
+b = len
+try:
+    raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])
+except* AttributeError:
+    b = eval
+except* ValueError:
+    result = b("1+1")
+'''
+              safe_markers = execute('safe_rebind_first_handler', safe_rebind, 3)
+              unsafe_markers = execute('unsafe_control', unsafe_control, 2)
+              introduced_markers = execute('danger_introduced_first_handler', introduced_danger, 2)
+              print('SAFE_MARKERS', safe_markers)
+              print('UNSAFE_MARKERS', unsafe_markers)
+              print('INTRODUCED_MARKERS', introduced_markers)
+          finally:
+              sys.modules.pop(module_name, None)
+          PY
