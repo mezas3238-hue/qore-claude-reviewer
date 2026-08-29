@@ -1,0 +1,79 @@
+name: Exact-head R62N adversarial matrix
+
+on:
+  push:
+    paths:
+      - .github/workflows/probe-1ef-r62n-matrix.yml
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Create reviewer installation token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.QORE_CLAUDE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.QORE_CLAUDE_APP_PRIVATE_KEY }}
+          owner: mezas3238-hue
+          repositories: qore-core
+          permission-contents: read
+      - name: Checkout exact Core HEAD
+        uses: actions/checkout@v4
+        with:
+          repository: mezas3238-hue/qore-core
+          ref: 1ef22b1796576166840481aa14f865a1212b8c09
+          token: ${{ steps.app-token.outputs.token }}
+          path: core
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12.14'
+      - name: Install
+        working-directory: core
+        run: pip install -e ".[dev]"
+      - name: Matrix
+        working-directory: core
+        run: |
+          python - <<'PY'
+          import importlib.util
+          import sys
+          from pathlib import Path
+          test_dir = Path("tests/infrastructure").resolve()
+          sys.path.insert(0, str(test_dir))
+          target = test_dir / "test_universal_cross_asset_conformance_final_owner_r62n_guards.py"
+          spec = importlib.util.spec_from_file_location("r62n_probe_target", target)
+          assert spec is not None and spec.loader is not None
+          mod = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(mod)
+          runtime = mod._runtime_result
+          markers = mod._r62n_dynamic_execution_markers_from_source
+          def calls(src): return tuple(x for x in markers(src) if x.startswith("call:"))
+          cases = [
+            ("claude-f1-danger", 'b = eval\ntry:\n    try:\n        raise ValueError("v")\n    except* TypeError:\n        pass\nexcept ValueError:\n    result = b("1+1")\n', 2, True),
+            ("claude-f1-safe", 'b = len\ntry:\n    try:\n        raise ValueError("v")\n    except* TypeError:\n        pass\nexcept ValueError:\n    result = b("abc")\n', 3, False),
+            ("plain-match-safe", 'b = eval\ntry:\n    raise ValueError("v")\nexcept* ValueError:\n    b = len\nresult = b("abc")\n', 3, False),
+            ("plain-match-danger", 'b = len\ntry:\n    raise ValueError("v")\nexcept* ValueError:\n    b = eval\nresult = b("1+1")\n', 2, True),
+            ("plain-reraise-safe", 'b = eval\ntry:\n    try:\n        raise ValueError("v")\n    except* ValueError:\n        b = len\n        raise\nexcept ExceptionGroup:\n    result = b("abc")\n', 3, False),
+            ("plain-reraise-danger", 'b = len\ntry:\n    try:\n        raise ValueError("v")\n    except* ValueError:\n        b = eval\n        raise\nexcept ExceptionGroup:\n    result = b("1+1")\n', 2, True),
+            ("new-not-caught-sibling", 'b = len\ntry:\n    try:\n        raise ExceptionGroup("eg", [AttributeError("a")])\n    except* AttributeError:\n        b = eval\n        raise ValueError("new")\n    except* ValueError:\n        b = len\nexcept ValueError:\n    result = b("1+1")\n', 2, True),
+            ("later-subgroup-repairs", 'b = len\ntry:\n    try:\n        raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])\n    except* AttributeError:\n        b = eval\n        raise TypeError("new")\n    except* ValueError:\n        b = len\nexcept TypeError:\n    result = b("abc")\n', 3, False),
+            ("remainder-danger", 'b = len\ntry:\n    try:\n        raise ExceptionGroup("eg", [AttributeError("a"), KeyError("k")])\n    except* AttributeError:\n        b = eval\nexcept ExceptionGroup:\n    result = b("1+1")\n', 2, True),
+            ("remainder-safe", 'b = eval\ntry:\n    try:\n        raise ExceptionGroup("eg", [AttributeError("a"), KeyError("k")])\n    except* AttributeError:\n        b = len\nexcept ExceptionGroup:\n    result = b("abc")\n', 3, False),
+            ("mixed-safe", 'b = eval\ntry:\n    try:\n        raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])\n    except* AttributeError:\n        b = eval\n        raise\n    except* ValueError:\n        b = len\n        raise TypeError("new")\nexcept ExceptionGroup:\n    result = b("abc")\n', 3, False),
+            ("mixed-danger", 'b = len\ntry:\n    try:\n        raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v")])\n    except* AttributeError:\n        b = len\n        raise\n    except* ValueError:\n        b = eval\n        raise TypeError("new")\nexcept ExceptionGroup:\n    result = b("1+1")\n', 2, True),
+            ("finally-safe", 'b = eval\ntry:\n    raise ValueError("v")\nexcept* ValueError:\n    b = len\nfinally:\n    result = b("abc")\n', 3, False),
+            ("finally-danger", 'b = len\ntry:\n    raise ValueError("v")\nexcept* ValueError:\n    b = eval\nfinally:\n    result = b("1+1")\n', 2, True),
+            ("three-safe", 'b = eval\ntry:\n    raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v"), TypeError("t")])\nexcept* AttributeError:\n    b = eval\nexcept* ValueError:\n    b = eval\nexcept* TypeError:\n    b = len\nresult = b("abc")\n', 3, False),
+            ("three-danger", 'b = len\ntry:\n    raise ExceptionGroup("eg", [AttributeError("a"), ValueError("v"), TypeError("t")])\nexcept* AttributeError:\n    b = len\nexcept* ValueError:\n    b = len\nexcept* TypeError:\n    b = eval\nresult = b("1+1")\n', 2, True),
+          ]
+          for name, src, expected, danger in cases:
+              got = runtime(src); c = calls(src)
+              print(name, got, c)
+              assert got == expected, (name, got, expected)
+              assert bool(c) is danger, (name, c, danger)
+          print("ADVERSARIAL MATRIX PASS 16/16")
+          PY
