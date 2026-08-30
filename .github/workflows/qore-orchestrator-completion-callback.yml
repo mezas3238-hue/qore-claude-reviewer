@@ -9,6 +9,7 @@ on:
   pull_request:
     paths:
       - ".github/workflows/qore-orchestrator-completion-callback.yml"
+      - ".github/workflows/claude-qore-review.yml"
       - "scripts/emit_orchestrator_completion.py"
 
 permissions:
@@ -35,6 +36,18 @@ jobs:
           set -euo pipefail
           python3 -m py_compile scripts/emit_orchestrator_completion.py
           python3 scripts/emit_orchestrator_completion.py --self-test
+
+      - name: Verify Claude workflow package run binding exists
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          needle = "run-name: Claude QORE review · $" + "{{ inputs.package_id }}"
+          lines = Path(".github/workflows/claude-qore-review.yml").read_text(encoding="utf-8").splitlines()
+          if needle not in lines:
+              raise SystemExit("Claude run-name is not exactly package-bound")
+          print("Claude run-name package binding: PASS")
+          PY
 
       - name: Create isolated orchestrator callback token
         id: callback-token
@@ -103,5 +116,4 @@ jobs:
             --repository mezas3238-hue/qore-claude-reviewer \
             --workflow-name "Claude QORE review" \
             --actor CLAUDE_CODE \
-            --binding artifact \
-            --artifact-prefix claude-
+            --binding run_name
