@@ -18,6 +18,8 @@ jobs:
     steps:
       - name: Checkout reviewer infrastructure
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Validate request and dispatch Claude review
         env:
@@ -26,12 +28,29 @@ jobs:
           set -euo pipefail
           REQUEST=requests/current.json
           jq -e '
-            (.pr_number | type == "number") and
+            (keys == ["expected_base", "expected_head", "expected_synthetic", "package_id", "pr_number", "prompt_path", "qg"]) and
+            (.pr_number | type == "number" and . > 0 and floor == .) and
             (.package_id | type == "string" and length > 0) and
-            (.expected_base | type == "string" and length == 40) and
-            (.expected_head | type == "string" and length == 40) and
-            (.expected_synthetic | type == "string" and length == 40) and
-            (.prompt_path | type == "string" and length > 0)
+            (.expected_base | type == "string" and test("^[0-9a-f]{40}$")) and
+            (.expected_head | type == "string" and test("^[0-9a-f]{40}$")) and
+            (.expected_synthetic | type == "string" and test("^[0-9a-f]{40}$")) and
+            (.prompt_path | type == "string" and length > 0) and
+            (.qg | type == "object") and
+            (.qg | keys == ["expected", "job_id", "run_id"]) and
+            (.qg.run_id | type == "number" and . > 0 and floor == .) and
+            (.qg.job_id | type == "number" and . > 0 and floor == .) and
+            (.qg.expected | type == "object") and
+            (.qg.expected | keys == ["coverage_missed_statements", "coverage_percent", "coverage_total_statements", "mypy_source_files", "pytest_collected", "pytest_passed", "pytest_warnings", "ruff_passed"]) and
+            (.qg.expected.ruff_passed == true) and
+            (.qg.expected.mypy_source_files | type == "number" and . > 0 and floor == .) and
+            (.qg.expected.pytest_collected | type == "number" and . > 0 and floor == .) and
+            (.qg.expected.pytest_passed | type == "number" and . > 0 and floor == .) and
+            (.qg.expected.pytest_warnings | type == "number" and . >= 0 and floor == .) and
+            (.qg.expected.coverage_total_statements | type == "number" and . > 0 and floor == .) and
+            (.qg.expected.coverage_missed_statements | type == "number" and . >= 0 and floor == .) and
+            (.qg.expected.coverage_percent | type == "number" and . >= 0 and . <= 100 and floor == .) and
+            (.qg.expected.pytest_collected == .qg.expected.pytest_passed) and
+            (.qg.expected.coverage_missed_statements <= .qg.expected.coverage_total_statements)
           ' "$REQUEST" >/dev/null
           PR_NUMBER="$(jq -r '.pr_number' "$REQUEST")"
           PACKAGE_ID="$(jq -r '.package_id' "$REQUEST")"
@@ -39,6 +58,9 @@ jobs:
           EXPECTED_HEAD="$(jq -r '.expected_head' "$REQUEST")"
           EXPECTED_SYNTHETIC="$(jq -r '.expected_synthetic' "$REQUEST")"
           PROMPT_PATH="$(jq -r '.prompt_path' "$REQUEST")"
+          QG_RUN_ID="$(jq -r '.qg.run_id' "$REQUEST")"
+          QG_JOB_ID="$(jq -r '.qg.job_id' "$REQUEST")"
+          EXPECTED_QG_SUMMARY="$(jq -c '.qg.expected' "$REQUEST")"
           test -f "$PROMPT_PATH"
           case "$PACKAGE_ID" in
             QORE-*-CLAUDE-*) ;;
@@ -52,5 +74,8 @@ jobs:
             -f "expected_base=${EXPECTED_BASE}" \
             -f "expected_head=${EXPECTED_HEAD}" \
             -f "expected_synthetic=${EXPECTED_SYNTHETIC}" \
+            -f "qg_run_id=${QG_RUN_ID}" \
+            -f "qg_job_id=${QG_JOB_ID}" \
+            -f "expected_qg_summary=${EXPECTED_QG_SUMMARY}" \
             -f "prompt_path=${PROMPT_PATH}"
           echo "Claude workflow dispatch accepted."
