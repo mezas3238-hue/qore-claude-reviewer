@@ -1,0 +1,40 @@
+name: Claude QG binding free probe
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/claude-auto-dispatch.yml
+      - .github/workflows/claude-qore-review.yml
+      - .github/workflows/claude-qg-binding-probe.yml
+      - scripts/qg_binding.py
+      - tests/**
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/claude-auto-dispatch.yml
+      - .github/workflows/claude-qore-review.yml
+      - .github/workflows/claude-qg-binding-probe.yml
+      - scripts/qg_binding.py
+      - tests/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: free QG binding regression probe
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout reviewer infrastructure
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Compile fail-closed QG binder
+        run: python3 -m py_compile scripts/qg_binding.py
+
+      - name: Run QG binding and workflow contract regressions
+        run: python3 -m unittest discover -s tests -v

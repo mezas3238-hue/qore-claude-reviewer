@@ -23,6 +23,18 @@ on:
         description: Expected frozen synthetic PR merge SHA
         required: true
         type: string
+      qg_run_id:
+        description: Exact authoritative qore-core Quality Gate run ID
+        required: true
+        type: string
+      qg_job_id:
+        description: Exact authoritative qore-core quality job ID
+        required: true
+        type: string
+      expected_qg_summary:
+        description: Strict 8-key JSON with expected Ruff, Mypy, pytest and TOTAL coverage results
+        required: true
+        type: string
       prompt_path:
         description: Prompt file in reviewer repository
         required: true
@@ -40,6 +52,8 @@ jobs:
     steps:
       - name: Checkout Claude reviewer infrastructure
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Create QORE Claude Reviewer installation token
         id: app-token
@@ -49,6 +63,7 @@ jobs:
           private-key: ${{ secrets.QORE_CLAUDE_APP_PRIVATE_KEY }}
           owner: mezas3238-hue
           repositories: qore-core
+          permission-actions: read
           permission-contents: read
           permission-pull-requests: read
 
@@ -76,6 +91,36 @@ jobs:
           test "$LIVE_BASE" = "$EXPECTED_BASE"
           test "$LIVE_HEAD" = "$EXPECTED_HEAD"
           test "$LIVE_SYNTHETIC" = "$EXPECTED_SYNTHETIC"
+
+      - name: Fetch and bind exact live Quality Gate evidence
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          EXPECTED_HEAD: ${{ inputs.expected_head }}
+          EXPECTED_SYNTHETIC: ${{ inputs.expected_synthetic }}
+          QG_RUN_ID: ${{ inputs.qg_run_id }}
+          QG_JOB_ID: ${{ inputs.qg_job_id }}
+          EXPECTED_QG_SUMMARY: ${{ inputs.expected_qg_summary }}
+          QG_EVIDENCE_OUTPUT: ${{ runner.temp }}/qore-quality-gate-binding.md
+        run: |
+          set -euo pipefail
+          case "$QG_RUN_ID" in (*[!0-9]*|'') echo "Invalid QG run ID" >&2; exit 1;; esac
+          case "$QG_JOB_ID" in (*[!0-9]*|'') echo "Invalid QG job ID" >&2; exit 1;; esac
+          gh api "repos/mezas3238-hue/qore-core/actions/runs/${QG_RUN_ID}" \
+            > "$RUNNER_TEMP/qore-quality-run.json"
+          gh api "repos/mezas3238-hue/qore-core/actions/jobs/${QG_JOB_ID}" \
+            > "$RUNNER_TEMP/qore-quality-job.json"
+          gh api "repos/mezas3238-hue/qore-core/actions/jobs/${QG_JOB_ID}/logs" \
+            > "$RUNNER_TEMP/qore-quality-job.log"
+          python3 scripts/qg_binding.py \
+            --run-json "$RUNNER_TEMP/qore-quality-run.json" \
+            --job-json "$RUNNER_TEMP/qore-quality-job.json" \
+            --job-log "$RUNNER_TEMP/qore-quality-job.log" \
+            --expected-run-id "$QG_RUN_ID" \
+            --expected-job-id "$QG_JOB_ID" \
+            --expected-head "$EXPECTED_HEAD" \
+            --expected-synthetic "$EXPECTED_SYNTHETIC" \
+            --expected-summary-json "$EXPECTED_QG_SUMMARY" \
+            --output "$QG_EVIDENCE_OUTPUT"
 
       - name: Checkout exact qore-core HEAD
         uses: actions/checkout@v4
@@ -121,6 +166,7 @@ jobs:
           EXPECTED_BASE: ${{ inputs.expected_base }}
           EXPECTED_HEAD: ${{ inputs.expected_head }}
           EVIDENCE_OUTPUT: ${{ runner.temp }}/qore-claude-mandatory-evidence.md
+          QG_EVIDENCE_PATH: ${{ runner.temp }}/qore-quality-gate-binding.md
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -139,6 +185,7 @@ jobs:
           base = os.environ["EXPECTED_BASE"]
           head = os.environ["EXPECTED_HEAD"]
           output = Path(os.environ["EVIDENCE_OUTPUT"])
+          qg_evidence = Path(os.environ["QG_EVIDENCE_PATH"])
           infra = root / "tests" / "infrastructure"
           sys.path.insert(0, str(infra))
 
@@ -394,9 +441,9 @@ jobs:
               *changed,
               "```",
               "",
-              "Quality Gate evidence bound by Integration Authority before this run:",
-              "QORE CI run 33260165867 / job 99120615940; synthetic 871def531b0f1222e6a1e61252af700f4ed204e3; CPython 3.12.14; Ruff clean; Mypy 740 source files; 4862 passed; 7 warnings; TOTAL coverage 87%.",
-              "Treat this QG sentence as supplied evidence; use the checkout and mandatory probes to falsify semantic claims independently.",
+              qg_evidence.read_text(encoding="utf-8").rstrip(),
+              "",
+              "The QG block above was fetched live from the exact bound qore-core job and parsed fail-closed; use the checkout and mandatory probes to falsify semantic claims independently.",
           ])
           output.write_text("\n".join(lines) + "\n", encoding="utf-8")
           print(f"Mandatory evidence written: {output}")
@@ -478,19 +525,48 @@ jobs:
               raise SystemExit("Claude reported MECHANICAL REVIEW FAILURE")
           PY
 
-      - name: Verify reviewer remained read-only and frozen HEAD is unchanged
+      - name: Verify reviewer remained read-only and complete freeze is unchanged
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           PR_NUMBER: ${{ inputs.pr_number }}
+          EXPECTED_BASE: ${{ inputs.expected_base }}
           EXPECTED_HEAD: ${{ inputs.expected_head }}
+          EXPECTED_SYNTHETIC: ${{ inputs.expected_synthetic }}
+          QG_RUN_ID: ${{ inputs.qg_run_id }}
+          QG_JOB_ID: ${{ inputs.qg_job_id }}
+          EXPECTED_QG_SUMMARY: ${{ inputs.expected_qg_summary }}
           QORE_ROOT: ${{ github.workspace }}/workspace/qore-core
         run: |
           set -euo pipefail
           test -z "$(git -C "$QORE_ROOT" status --porcelain)"
           test "$(git -C "$QORE_ROOT" rev-parse HEAD)" = "$EXPECTED_HEAD"
-          LIVE_HEAD="$(gh api "repos/mezas3238-hue/qore-core/pulls/${PR_NUMBER}" --jq '.head.sha')"
-          echo "Post-review HEAD: ${LIVE_HEAD}"
-          test "$LIVE_HEAD" = "$EXPECTED_HEAD"
+          PR_JSON="$(gh api "repos/mezas3238-hue/qore-core/pulls/${PR_NUMBER}")"
+          test "$(printf '%s' "$PR_JSON" | jq -r '.state')" = "open"
+          test "$(printf '%s' "$PR_JSON" | jq -r '.merged')" = "false"
+          test "$(printf '%s' "$PR_JSON" | jq -r '.base.sha')" = "$EXPECTED_BASE"
+          test "$(printf '%s' "$PR_JSON" | jq -r '.head.sha')" = "$EXPECTED_HEAD"
+          test "$(printf '%s' "$PR_JSON" | jq -r '.merge_commit_sha')" = "$EXPECTED_SYNTHETIC"
+          SYNTHETIC_JSON="$(gh api "repos/mezas3238-hue/qore-core/git/commits/${EXPECTED_SYNTHETIC}")"
+          test "$(printf '%s' "$SYNTHETIC_JSON" | jq -r '[.parents[].sha] | join(" ")')" = "$EXPECTED_BASE $EXPECTED_HEAD"
+          test "$(printf '%s' "$SYNTHETIC_JSON" | jq -r '.tree.sha')" = "$(git -C "$QORE_ROOT" show -s --format=%T "$EXPECTED_HEAD")"
+          gh api "repos/mezas3238-hue/qore-core/actions/runs/${QG_RUN_ID}" \
+            > "$RUNNER_TEMP/qore-quality-run-post.json"
+          gh api "repos/mezas3238-hue/qore-core/actions/jobs/${QG_JOB_ID}" \
+            > "$RUNNER_TEMP/qore-quality-job-post.json"
+          gh api "repos/mezas3238-hue/qore-core/actions/jobs/${QG_JOB_ID}/logs" \
+            > "$RUNNER_TEMP/qore-quality-job-post.log"
+          python3 scripts/qg_binding.py \
+            --run-json "$RUNNER_TEMP/qore-quality-run-post.json" \
+            --job-json "$RUNNER_TEMP/qore-quality-job-post.json" \
+            --job-log "$RUNNER_TEMP/qore-quality-job-post.log" \
+            --expected-run-id "$QG_RUN_ID" \
+            --expected-job-id "$QG_JOB_ID" \
+            --expected-head "$EXPECTED_HEAD" \
+            --expected-synthetic "$EXPECTED_SYNTHETIC" \
+            --expected-summary-json "$EXPECTED_QG_SUMMARY" \
+            --output "$RUNNER_TEMP/qore-quality-gate-binding-post.md"
+          cmp "$RUNNER_TEMP/qore-quality-gate-binding.md" "$RUNNER_TEMP/qore-quality-gate-binding-post.md"
+          echo "Post-review BASE/HEAD/SYNTHETIC/QG freeze revalidated."
 
       - name: Expose Claude review evidence
         if: ${{ always() }}
@@ -518,6 +594,8 @@ jobs:
             claude-review.md
             claude-execution.json
             ${{ runner.temp }}/qore-claude-mandatory-evidence.md
+            ${{ runner.temp }}/qore-quality-gate-binding.md
+            ${{ runner.temp }}/qore-quality-gate-binding-post.md
           if-no-files-found: warn
           retention-days: 30
 
