@@ -115,5 +115,6 @@ jobs:
             --event "$GITHUB_EVENT_PATH" \
             --repository mezas3238-hue/qore-claude-reviewer \
             --workflow-name "Claude QORE review" \
+            --workflow-path ".github/workflows/claude-qore-review.yml" \
             --actor CLAUDE_CODE \
             --binding run_name
