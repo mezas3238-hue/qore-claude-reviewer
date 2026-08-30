@@ -66,7 +66,8 @@ def _decode_content(payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict) or not isinstance(payload.get("content"), str):
         raise CallbackError("requests/current.json content is unavailable")
     try:
-        raw = base64.b64decode(payload["content"], validate=True).decode("utf-8")
+        encoded = "".join(payload["content"].split())
+        raw = base64.b64decode(encoded, validate=True).decode("utf-8")
         value = json.loads(raw)
     except (ValueError, UnicodeError, json.JSONDecodeError) as exc:
         raise CallbackError("requests/current.json is invalid") from exc
@@ -91,7 +92,7 @@ def _package_re(actor: str) -> re.Pattern[str]:
 def package_from_display_title(title: Any, workflow_name: str, actor: str) -> str:
     prefix = f"{workflow_name} · "
     text = str(title or "")
-    package_id = text[len(prefix) :].strip() if text.startswith(prefix) else ""
+    package_id = text[len(prefix):].strip() if text.startswith(prefix) else ""
     if _package_re(actor).fullmatch(package_id) is None:
         raise CallbackError("workflow display title is not bound to an exact package")
     return package_id
@@ -107,7 +108,7 @@ def package_from_artifacts(artifacts: Any, prefix: str, actor: str) -> str:
         name = item.get("name")
         if not isinstance(name, str) or not name.startswith(prefix):
             continue
-        package_id = name[len(prefix) :]
+        package_id = name[len(prefix):]
         if _package_re(actor).fullmatch(package_id):
             matches.append(package_id)
     unique = sorted(set(matches))
@@ -140,8 +141,7 @@ def validate_run(
         head_sha = payload.get("head_sha")
         if not isinstance(head_sha, str) or SHA_RE.fullmatch(head_sha) is None:
             raise CallbackError("reviewer run head SHA is invalid")
-        observed_attempt = payload.get("run_attempt", 1)
-        if observed_attempt != attempt:
+        if payload.get("run_attempt", 1) != attempt:
             raise CallbackError("workflow run attempt mismatch")
     if event_run.get("head_sha") != live_run.get("head_sha"):
         raise CallbackError("event/live reviewer HEAD mismatch")
@@ -183,10 +183,21 @@ def build_callback(
 def _self_test() -> None:
     claude = "QORE-SOL-012345abcdef-CLAUDE-R123"
     deepseek = "QORE-SOL-012345abcdef-DS-EXPERT-R123"
-    assert package_from_display_title(f"DeepSeek QORE review · {deepseek}", "DeepSeek QORE review", "DEEPSEEK") == deepseek
+    assert package_from_display_title(
+        f"DeepSeek QORE review · {deepseek}", "DeepSeek QORE review", "DEEPSEEK"
+    ) == deepseek
     artifacts = {"artifacts": [{"name": f"claude-{claude}", "expired": False}]}
     assert package_from_artifacts(artifacts, "claude-", "CLAUDE_CODE") == claude
-    callback = build_callback(repository="mezas3238-hue/qore-claude-reviewer", actor="CLAUDE_CODE", run_id=7, attempt=1, package_id=claude)
+    encoded = base64.b64encode(json.dumps({"package_id": claude}).encode()).decode()
+    wrapped = encoded[:8] + "\n" + encoded[8:]
+    assert _decode_content({"content": wrapped})["package_id"] == claude
+    callback = build_callback(
+        repository="mezas3238-hue/qore-claude-reviewer",
+        actor="CLAUDE_CODE",
+        run_id=7,
+        attempt=1,
+        package_id=claude,
+    )
     assert callback["client_payload"]["package_id"] == claude
     try:
         package_from_display_title("DeepSeek QORE review", "DeepSeek QORE review", "DEEPSEEK")
@@ -218,14 +229,17 @@ def main() -> int:
     if not source_token or not callback_token:
         raise CallbackError("required GitHub tokens are unavailable")
 
-    event = json.loads(open(args.event, encoding="utf-8").read())
+    with open(args.event, encoding="utf-8") as event_file:
+        event = json.load(event_file)
     event_run = event.get("workflow_run") if isinstance(event, dict) else None
     source_api = f"https://api.github.com/repos/{args.repository}"
     if not isinstance(event_run, dict):
         raise CallbackError("workflow_run event is missing")
     event_run_id = _positive_int(event_run.get("id"), "workflow_run.id")
     live_run = api_json(source_token, source_api, f"/actions/runs/{event_run_id}")
-    run_id, attempt, head_sha, conclusion = validate_run(event_run, live_run, workflow_name=args.workflow_name)
+    run_id, attempt, head_sha, conclusion = validate_run(
+        event_run, live_run, workflow_name=args.workflow_name
+    )
 
     request = request_at_head(source_token, source_api, head_sha)
     request_package = request.get("package_id")
@@ -236,17 +250,20 @@ def main() -> int:
         raise CallbackError("run HEAD request expected_head is invalid")
 
     if args.binding == "run_name":
-        package_id = package_from_display_title(live_run.get("display_title"), args.workflow_name, args.actor)
+        package_id = package_from_display_title(
+            live_run.get("display_title"), args.workflow_name, args.actor
+        )
     else:
         if not args.artifact_prefix:
             raise CallbackError("artifact binding requires an artifact prefix")
-        artifact_payload = api_json(source_token, source_api, f"/actions/runs/{run_id}/artifacts?per_page=100")
+        artifact_payload = api_json(
+            source_token, source_api, f"/actions/runs/{run_id}/artifacts?per_page=100"
+        )
         try:
-            package_id = package_from_artifacts(artifact_payload, args.artifact_prefix, args.actor)
+            package_id = package_from_artifacts(
+                artifact_payload, args.artifact_prefix, args.actor
+            )
         except CallbackError:
-            # A failed reviewer may terminate before its always-upload evidence is produced.
-            # Waking Sol to adjudicate a mechanical failure is safe because neither this
-            # callback nor the orchestrator receiver treats completion as semantic PASS.
             if conclusion == "success":
                 raise
             package_id = request_package
@@ -263,22 +280,17 @@ def main() -> int:
         package_id=package_id,
     )
     api_json(callback_token, ORCHESTRATOR_API, "/dispatches", method="POST", payload=payload)
-    print(
-        json.dumps(
-            {
-                "callback": "accepted",
-                "actor": args.actor,
-                "repository": args.repository,
-                "workflow_run_id": run_id,
-                "workflow_run_attempt": attempt,
-                "package_id": package_id,
-                "reviewer_conclusion": conclusion,
-                "reviewer_head_sha": head_sha,
-                "candidate_head": expected_head,
-            },
-            sort_keys=True,
-        )
-    )
+    print(json.dumps({
+        "callback": "accepted",
+        "actor": args.actor,
+        "repository": args.repository,
+        "workflow_run_id": run_id,
+        "workflow_run_attempt": attempt,
+        "package_id": package_id,
+        "reviewer_conclusion": conclusion,
+        "reviewer_head_sha": head_sha,
+        "candidate_head": expected_head,
+    }, sort_keys=True))
     return 0
 
 
