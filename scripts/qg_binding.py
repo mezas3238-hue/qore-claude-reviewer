@@ -66,6 +66,10 @@ _ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 _TIMESTAMP_RE = re.compile(
     r"^\ufeff?\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z "
 )
+_QORE_CI_WORKFLOW_ID = 328173079
+_QORE_CI_WORKFLOW_NAME = "QORE CI"
+_QORE_CI_WORKFLOW_PATH = ".github/workflows/ci.yml"
+_ALLOWED_REVIEW_EVENTS = frozenset({"pull_request"})
 
 
 def _strict_int(value: object, label: str, *, minimum: int) -> int:
@@ -278,6 +282,19 @@ def verify_quality_binding(
     _require_equal(job_payload.get("head_sha"), expected_head, "job.head_sha")
 
     _require_equal(_payload_int(run_payload, "id", "run"), expected_run_id, "run.id")
+    _require_equal(
+        run_payload.get("workflow_id"),
+        _QORE_CI_WORKFLOW_ID,
+        "run.workflow_id",
+    )
+    _require_equal(run_payload.get("name"), _QORE_CI_WORKFLOW_NAME, "run.name")
+    _require_equal(run_payload.get("path"), _QORE_CI_WORKFLOW_PATH, "run.path")
+    if run_payload.get("event") not in _ALLOWED_REVIEW_EVENTS:
+        raise BindingError(
+            "run.event is not authorized for an open-PR review: "
+            f"expected one of {sorted(_ALLOWED_REVIEW_EVENTS)!r}, "
+            f"got {run_payload.get('event')!r}"
+        )
     _require_equal(run_payload.get("status"), "completed", "run.status")
     _require_equal(run_payload.get("conclusion"), "success", "run.conclusion")
     _require_equal(run_payload.get("head_sha"), expected_head, "run.head_sha")
@@ -301,6 +318,8 @@ def render_markdown(binding: VerifiedBinding) -> str:
         [
             "## Authoritative qore-core Quality Gate binding",
             "",
+            "- Workflow: `QORE CI` (`328173079`; `.github/workflows/ci.yml`; "
+            "event `pull_request`)",
             f"- Run: `{binding.run_id}` (`completed/success`; HEAD `{binding.head_sha}`)",
             f"- Job: `{binding.job_id}` (`quality`, `completed/success`; HEAD `{binding.head_sha}`)",
             f"- Executed synthetic: `{binding.synthetic_sha}` (checkout `git log -1 --format=%H`)",

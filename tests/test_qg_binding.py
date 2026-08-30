@@ -87,6 +87,10 @@ def job_payload() -> dict[str, object]:
 def run_payload() -> dict[str, object]:
     return {
         "id": RUN_ID,
+        "workflow_id": 328173079,
+        "name": "QORE CI",
+        "path": ".github/workflows/ci.yml",
+        "event": "pull_request",
         "status": "completed",
         "conclusion": "success",
         "head_sha": HEAD,
@@ -161,6 +165,34 @@ class QualityBindingTests(unittest.TestCase):
         run["conclusion"] = "cancelled"
         with self.assertRaises(BindingError):
             self.verify(run=run)
+
+    def test_rejects_wrong_or_missing_workflow_identity_fields(self) -> None:
+        wrong_values: dict[str, object] = {
+            "workflow_id": 328173080,
+            "name": "Shadow QORE CI",
+            "path": ".github/workflows/shadow-ci.yml",
+            "event": "workflow_dispatch",
+        }
+        for field, wrong in wrong_values.items():
+            payload = run_payload()
+            payload[field] = wrong
+            with self.subTest(field=field, condition="wrong"), self.assertRaises(
+                BindingError
+            ):
+                self.verify(run=payload)
+
+            payload = run_payload()
+            del payload[field]
+            with self.subTest(field=field, condition="missing"), self.assertRaises(
+                BindingError
+            ):
+                self.verify(run=payload)
+
+    def test_rejects_canonical_postmerge_push_as_pr_review_authority(self) -> None:
+        payload = run_payload()
+        payload["event"] = "push"
+        with self.assertRaises(BindingError):
+            self.verify(run=payload)
 
     def test_rejects_checkout_command_or_synthetic_output_drift(self) -> None:
         mutations = (

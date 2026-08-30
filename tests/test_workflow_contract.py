@@ -53,6 +53,21 @@ class WorkflowContractTests(unittest.TestCase):
             with self.subTest(stale=stale):
                 self.assertNotIn(stale, text)
 
+    def test_binder_authenticates_canonical_workflow_and_pr_event_only(self) -> None:
+        text = (ROOT / "scripts" / "qg_binding.py").read_text(encoding="utf-8")
+        for required in (
+            '_QORE_CI_WORKFLOW_ID = 328173079',
+            '_QORE_CI_WORKFLOW_NAME = "QORE CI"',
+            '_QORE_CI_WORKFLOW_PATH = ".github/workflows/ci.yml"',
+            '_ALLOWED_REVIEW_EVENTS = frozenset({"pull_request"})',
+            'run_payload.get("workflow_id")',
+            'run_payload.get("name")',
+            'run_payload.get("path")',
+            'run_payload.get("event") not in _ALLOWED_REVIEW_EVENTS',
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, text)
+
     def test_claude_read_only_boundary_and_full_postreview_freeze_remain(self) -> None:
         text = (WORKFLOWS / "claude-qore-review.yml").read_text(encoding="utf-8")
         for required in (
