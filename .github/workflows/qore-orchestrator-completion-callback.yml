@@ -1,0 +1,107 @@
+name: QORE orchestrator completion callback
+
+on:
+  workflow_run:
+    workflows:
+      - Claude QORE review
+    types:
+      - completed
+  pull_request:
+    paths:
+      - ".github/workflows/qore-orchestrator-completion-callback.yml"
+      - "scripts/emit_orchestrator_completion.py"
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: qore-orchestrator-callback-${{ github.event.workflow_run.id || github.run_id }}-${{ github.event.workflow_run.run_attempt || 1 }}
+  cancel-in-progress: false
+
+jobs:
+  callback-preflight:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout callback candidate
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Compile and run callback regression self-test
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/emit_orchestrator_completion.py
+          python3 scripts/emit_orchestrator_completion.py --self-test
+
+      - name: Create least-authority orchestrator callback token
+        id: callback-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.QORE_CLAUDE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.QORE_CLAUDE_APP_PRIVATE_KEY }}
+          owner: mezas3238-hue
+          repositories: qore-ai-orchestrator
+          permission-contents: write
+
+      - name: Prove cross-repository dispatch authority without waking Sol
+        env:
+          GH_TOKEN: ${{ steps.callback-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          gh api repos/mezas3238-hue/qore-ai-orchestrator --jq '.full_name'
+          cat > "$RUNNER_TEMP/callback-preflight.json" <<'JSON'
+          {
+            "event_type": "qore_callback_preflight_v1",
+            "client_payload": {
+              "source": "qore-claude-reviewer",
+              "purpose": "permission-preflight-no-listener"
+            }
+          }
+          JSON
+          gh api --method POST \
+            repos/mezas3238-hue/qore-ai-orchestrator/dispatches \
+            --input "$RUNNER_TEMP/callback-preflight.json"
+          echo "Callback token can emit an unhandled repository_dispatch event."
+
+  emit-completion:
+    if: ${{ github.event_name == 'workflow_run' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Enforce trusted default-branch callback
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+
+      - name: Checkout trusted reviewer callback code
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Create least-authority orchestrator callback token
+        id: callback-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.QORE_CLAUDE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.QORE_CLAUDE_APP_PRIVATE_KEY }}
+          owner: mezas3238-hue
+          repositories: qore-ai-orchestrator
+          permission-contents: write
+
+      - name: Validate exact completed run and wake Sol once
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          QORE_CALLBACK_TOKEN: ${{ steps.callback-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          python3 scripts/emit_orchestrator_completion.py \
+            --event "$GITHUB_EVENT_PATH" \
+            --repository mezas3238-hue/qore-claude-reviewer \
+            --workflow-name "Claude QORE review" \
+            --actor CLAUDE_CODE \
+            --binding artifact \
+            --artifact-prefix claude-
