@@ -110,7 +110,7 @@ jobs:
             > "$RUNNER_TEMP/qore-quality-run.json"
           gh api "repos/mezas3238-hue/qore-core/actions/jobs/${QG_JOB_ID}" \
             > "$RUNNER_TEMP/qore-quality-job.json"
-          gh api "repos/mezas3238-hue/qore-core/actions/jobs/${QG_JOB_ID}/logs" \
+          gh api --allow-escape-sequences "repos/mezas3238-hue/qore-core/actions/jobs/${QG_JOB_ID}/logs" \
             > "$RUNNER_TEMP/qore-quality-job.log"
           python3 scripts/qg_binding.py \
             --run-json "$RUNNER_TEMP/qore-quality-run.json" \
@@ -554,7 +554,7 @@ jobs:
             > "$RUNNER_TEMP/qore-quality-run-post.json"
           gh api "repos/mezas3238-hue/qore-core/actions/jobs/${QG_JOB_ID}" \
             > "$RUNNER_TEMP/qore-quality-job-post.json"
-          gh api "repos/mezas3238-hue/qore-core/actions/jobs/${QG_JOB_ID}/logs" \
+          gh api --allow-escape-sequences "repos/mezas3238-hue/qore-core/actions/jobs/${QG_JOB_ID}/logs" \
             > "$RUNNER_TEMP/qore-quality-job-post.log"
           python3 scripts/qg_binding.py \
             --run-json "$RUNNER_TEMP/qore-quality-run-post.json" \
